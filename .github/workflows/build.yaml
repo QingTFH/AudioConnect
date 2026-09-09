@@ -18,15 +18,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: Win32
+          # 注意：sln 里的 32 位平台名是 x86（工程内部映射为 Win32）
+          # ARM（32 位）已移除：新版 MSVC 工具集不再提供 32 位 ARM 目标
+          - platform: x86
             outdir: Release
             artifact: AudioPlaybackConnector32
           - platform: x64
             outdir: x64/Release
             artifact: AudioPlaybackConnector64
-          - platform: ARM
-            outdir: ARM/Release
-            artifact: AudioPlaybackConnectorARM
           - platform: ARM64
             outdir: ARM64/Release
             artifact: AudioPlaybackConnectorARM64
@@ -53,8 +52,23 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      - name: Detect PlatformToolset
+        id: toolset
+        shell: pwsh
+        run: |
+          $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
+          $dirs = foreach ($root in $roots) {
+            Get-ChildItem -Path (Join-Path $root 'Microsoft Visual Studio\*\*\MSBuild\Microsoft\VC') `
+              -Directory -ErrorAction SilentlyContinue
+          }
+          $found = $dirs | Where-Object { $_.Name -match '^v\d+$' } |
+            Sort-Object { [int]$_.Name.TrimStart('v') } -Descending
+          $t = if ($found) { $found[0].Name } else { 'v143' }
+          Write-Host "detected PlatformToolset: $t"
+          "toolset=$t" >> $env:GITHUB_OUTPUT
+
       - name: Build ${{ matrix.platform }}
-        run: msbuild AudioPlaybackConnector.sln -nologo -m "-p:Configuration=Release;Platform=${{ matrix.platform }}"
+        run: msbuild AudioPlaybackConnector.sln -nologo -m "-p:Configuration=Release;Platform=${{ matrix.platform }};PlatformToolset=${{ steps.toolset.outputs.toolset }}"
 
       - uses: actions/upload-artifact@v4
         with:
