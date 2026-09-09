@@ -56,12 +56,29 @@ jobs:
         id: toolset
         shell: pwsh
         run: |
-          $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
-          $dirs = foreach ($root in $roots) {
-            Get-ChildItem -Path (Join-Path $root 'Microsoft Visual Studio\*\*\MSBuild\Microsoft\VC') `
-              -Directory -ErrorAction SilentlyContinue
+          $vcDirs = @()
+          # 1) 优先用 vswhere 定位 VS 安装目录
+          $vswhere = (Get-Command vswhere -ErrorAction SilentlyContinue).Source
+          if (-not $vswhere) {
+            $candidate = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+            if (Test-Path $candidate) { $vswhere = $candidate }
           }
-          $found = $dirs | Where-Object { $_.Name -match '^v\d+$' } |
+          if ($vswhere) {
+            $vs = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+            if ($vs) { $vcDirs += Join-Path $vs 'MSBuild\Microsoft\VC' }
+          }
+          # 2) 兜底：直接扫 Program Files 下的 VS 目录
+          foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+            if (-not $root) { continue }
+            $vsRoot = Join-Path $root 'Microsoft Visual Studio'
+            if (-not (Test-Path $vsRoot)) { continue }
+            $vcDirs += Get-ChildItem -Path $vsRoot -Recurse -Depth 5 -Directory -Filter 'VC' -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\MSBuild\\Microsoft\\VC$' } |
+              ForEach-Object { $_.FullName }
+          }
+          $found = $vcDirs | Where-Object { Test-Path $_ } |
+            ForEach-Object { Get-ChildItem -Path $_ -Directory -ErrorAction SilentlyContinue } |
+            Where-Object { $_.Name -match '^v\d+$' } |
             Sort-Object { [int]$_.Name.TrimStart('v') } -Descending
           $t = if ($found) { $found[0].Name } else { 'v143' }
           Write-Host "detected PlatformToolset: $t"
