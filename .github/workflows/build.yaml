@@ -56,31 +56,56 @@ jobs:
         id: toolset
         shell: pwsh
         run: |
-          $vcDirs = @()
-          # 1) 优先用 vswhere 定位 VS 安装目录
-          $vswhere = (Get-Command vswhere -ErrorAction SilentlyContinue).Source
-          if (-not $vswhere) {
-            $candidate = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-            if (Test-Path $candidate) { $vswhere = $candidate }
+          # MSVC 工具集名 (v143/v145...) 与 VS 版本不同步：VS18 上装的仍是 MSVC 14.5x -> v145。
+          # 因此从 VC\Tools\MSVC\<x.y.z> 推导：14.51 -> v145，14.39 -> v143。
+          function Get-VsInstallPath {
+            $vswhere = (Get-Command vswhere -ErrorAction SilentlyContinue).Source
+            if (-not $vswhere) {
+              $c = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+              if (Test-Path $c) { $vswhere = $c }
+            }
+            if ($vswhere) {
+              $p = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+              if ($p) { return $p.Trim() }
+            }
+            foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+              if (-not $root) { continue }
+              $vsRoot = Join-Path $root 'Microsoft Visual Studio'
+              if (Test-Path $vsRoot) {
+                $d = Get-ChildItem -Path $vsRoot -Directory -ErrorAction SilentlyContinue |
+                  Sort-Object Name -Descending | Select-Object -First 1
+                if ($d) { return $d.FullName }
+              }
+            }
           }
-          if ($vswhere) {
-            $vs = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
-            if ($vs) { $vcDirs += Join-Path $vs 'MSBuild\Microsoft\VC' }
+
+          $vs = Get-VsInstallPath
+          Write-Host "VS install path: $vs"
+          $t = $null
+          if ($vs) {
+            $toolsRoot = Join-Path $vs 'VC\Tools\MSVC'
+            if (Test-Path $toolsRoot) {
+              $verDir = Get-ChildItem -Path $toolsRoot -Directory -ErrorAction SilentlyContinue |
+                Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+              if ($verDir -and $verDir.Name -match '^(\d+)\.(\d+)') {
+                $major = [int]$Matches[1]; $minor = [int]$Matches[2]
+                $candidate = "v$($major)$([math]::Floor($minor / 10))"
+                $vcDir = Join-Path $vs "MSBuild\Microsoft\VC"
+                if ((Test-Path (Join-Path $vcDir $candidate)) -or -not (Test-Path $vcDir)) { $t = $candidate }
+              }
+            }
+            # 兜底：取 MSBuild\Microsoft\VC 下版本号最大的目录
+            if (-not $t) {
+              $vcDir = Join-Path $vs 'MSBuild\Microsoft\VC'
+              if (Test-Path $vcDir) {
+                $d = Get-ChildItem -Path $vcDir -Directory -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -match '^v\d+$' } |
+                  Sort-Object { [int]$_.Name.TrimStart('v') } -Descending | Select-Object -First 1
+                if ($d) { $t = $d.Name }
+              }
+            }
           }
-          # 2) 兜底：直接扫 Program Files 下的 VS 目录
-          foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
-            if (-not $root) { continue }
-            $vsRoot = Join-Path $root 'Microsoft Visual Studio'
-            if (-not (Test-Path $vsRoot)) { continue }
-            $vcDirs += Get-ChildItem -Path $vsRoot -Recurse -Depth 5 -Directory -Filter 'VC' -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match '\\MSBuild\\Microsoft\\VC$' } |
-              ForEach-Object { $_.FullName }
-          }
-          $found = $vcDirs | Where-Object { Test-Path $_ } |
-            ForEach-Object { Get-ChildItem -Path $_ -Directory -ErrorAction SilentlyContinue } |
-            Where-Object { $_.Name -match '^v\d+$' } |
-            Sort-Object { [int]$_.Name.TrimStart('v') } -Descending
-          $t = if ($found) { $found[0].Name } else { 'v143' }
+          if (-not $t) { $t = 'v143' }
           Write-Host "detected PlatformToolset: $t"
           "toolset=$t" >> $env:GITHUB_OUTPUT
 
