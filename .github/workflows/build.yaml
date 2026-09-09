@@ -81,6 +81,10 @@ jobs:
 
           $vs = Get-VsInstallPath
           Write-Host "VS install path: $vs"
+          if ($vs) {
+            Write-Host "MSBuild\Microsoft\VC: " + ((Get-ChildItem (Join-Path $vs 'MSBuild\Microsoft\VC') -Directory -ErrorAction SilentlyContinue | ForEach-Object Name) -join ',')
+            Write-Host "VC\Tools\MSVC: " + ((Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC') -Directory -ErrorAction SilentlyContinue | ForEach-Object Name) -join ',')
+          }
           $t = $null
           if ($vs) {
             $toolsRoot = Join-Path $vs 'VC\Tools\MSVC'
