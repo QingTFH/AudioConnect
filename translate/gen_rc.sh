@@ -1,5 +1,7 @@
 #!/bin/sh
 
+mkdir -p ./generated
+
 ./po2ymo.py ./source/zh_CN.po ./generated/zh_CN.ymo
 ./po2ymo.py ./source/zh_TW.po ./generated/zh_TW.ymo
 
