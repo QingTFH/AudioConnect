@@ -81,31 +81,36 @@ jobs:
 
           $vs = Get-VsInstallPath
           Write-Host "VS install path: $vs"
-          if ($vs) {
-            Write-Host "MSBuild\Microsoft\VC: " + ((Get-ChildItem (Join-Path $vs 'MSBuild\Microsoft\VC') -Directory -ErrorAction SilentlyContinue | ForEach-Object Name) -join ',')
-            Write-Host "VC\Tools\MSVC: " + ((Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC') -Directory -ErrorAction SilentlyContinue | ForEach-Object Name) -join ',')
-          }
           $t = $null
           if ($vs) {
-            $toolsRoot = Join-Path $vs 'VC\Tools\MSVC'
-            if (Test-Path $toolsRoot) {
-              $verDir = Get-ChildItem -Path $toolsRoot -Directory -ErrorAction SilentlyContinue |
-                Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-              if ($verDir -and $verDir.Name -match '^(\d+)\.(\d+)') {
-                $major = [int]$Matches[1]; $minor = [int]$Matches[2]
-                $candidate = "v$($major)$([math]::Floor($minor / 10))"
-                $vcDir = Join-Path $vs "MSBuild\Microsoft\VC"
-                if ((Test-Path (Join-Path $vcDir $candidate)) -or -not (Test-Path $vcDir)) { $t = $candidate }
-              }
-            }
-            # 兜底：取 MSBuild\Microsoft\VC 下版本号最大的目录
-            if (-not $t) {
-              $vcDir = Join-Path $vs 'MSBuild\Microsoft\VC'
-              if (Test-Path $vcDir) {
-                $d = Get-ChildItem -Path $vcDir -Directory -ErrorAction SilentlyContinue |
+            # 可用的 PlatformToolset 枚举在 <VS>\MSBuild\Microsoft\VC\<vcVer>\Platforms\<plat>\PlatformToolsets
+            $vcRoot = Join-Path $vs 'MSBuild\Microsoft\VC'
+            $vcVer = Get-ChildItem -Path $vcRoot -Directory -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match '^v\d+$' } |
+              Sort-Object { [int]$_.Name.TrimStart('v') } -Descending | Select-Object -First 1
+            if ($vcVer) {
+              foreach ($plat in @('x64', 'ARM64', 'Win32')) {
+                $ptRoot = Join-Path $vcVer.FullName "Platforms\$plat\PlatformToolsets"
+                if (-not (Test-Path $ptRoot)) { continue }
+                $d = Get-ChildItem -Path $ptRoot -Directory -ErrorAction SilentlyContinue |
                   Where-Object { $_.Name -match '^v\d+$' } |
                   Sort-Object { [int]$_.Name.TrimStart('v') } -Descending | Select-Object -First 1
-                if ($d) { $t = $d.Name }
+                if ($d) {
+                  Write-Host "toolsets under $plat : " + ((Get-ChildItem $ptRoot -Directory | ForEach-Object Name) -join ',')
+                  $t = $d.Name
+                  break
+                }
+              }
+            }
+            # 兜底：由 VC\Tools\MSVC 版本推导（14.51 -> v145, 14.39 -> v143）
+            if (-not $t) {
+              $toolsRoot = Join-Path $vs 'VC\Tools\MSVC'
+              if (Test-Path $toolsRoot) {
+                $verDir = Get-ChildItem -Path $toolsRoot -Directory -ErrorAction SilentlyContinue |
+                  Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+                if ($verDir -and $verDir.Name -match '^(\d+)\.(\d+)') {
+                  $t = "v$($Matches[1])$([math]::Floor([int]$Matches[2] / 10))"
+                }
               }
             }
           }
