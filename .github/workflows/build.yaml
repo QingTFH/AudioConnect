@@ -2,115 +2,80 @@ name: Build
 
 on:
   push:
-    tags: [ '**' ]
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
+    name: ${{ matrix.artifact }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Win32
+            outdir: Release
+            artifact: AudioPlaybackConnector32
+          - platform: x64
+            outdir: x64/Release
+            artifact: AudioPlaybackConnector64
+          - platform: ARM
+            outdir: ARM/Release
+            artifact: AudioPlaybackConnectorARM
+          - platform: ARM64
+            outdir: ARM64/Release
+            artifact: AudioPlaybackConnectorARM64
+
     steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-    - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v1.0.0
-    - uses: nuget/setup-nuget@v1
-      with:
-        nuget-version: latest
-    - uses: actions/setup-python@v1
-      with:
-        python-version: 3.7
-    - run: |
-        cd translate
-        pip install -r requirements.txt
-        ./gen_rc.sh
-      shell: bash
-    - run: nuget restore AudioPlaybackConnector.sln
-    - run: |
-        Start-Job -Init ([ScriptBlock]::Create("Set-Location '$pwd'")) -Script {
-          msbuild AudioPlaybackConnector.sln "-p:Configuration=Release;Platform=x64" }
-        Start-Job -Init ([ScriptBlock]::Create("Set-Location '$pwd'")) -Script {
-          msbuild AudioPlaybackConnector.sln "-p:Configuration=Release;Platform=x86" }
-        Start-Job -Init ([ScriptBlock]::Create("Set-Location '$pwd'")) -Script {
-          msbuild AudioPlaybackConnector.sln "-p:Configuration=Release;Platform=ARM64" }
-        Start-Job -Init ([ScriptBlock]::Create("Set-Location '$pwd'")) -Script {
-          msbuild AudioPlaybackConnector.sln "-p:Configuration=Release;Platform=ARM" }
-        Get-Job | Wait-Job | Receive-Job
-      shell: powershell
-    - uses: actions/upload-artifact@v2
-      with:
-        name: AudioPlaybackConnector64
-        path: x64/Release/AudioPlaybackConnector64.exe
-    - uses: actions/upload-artifact@v2
-      with:
-        name: AudioPlaybackConnector64
-        path: x64/Release/AudioPlaybackConnector64.pdb
-    - uses: actions/upload-artifact@v2
-      with:
-        name: AudioPlaybackConnector32
-        path: Release/AudioPlaybackConnector32.exe
-    - uses: actions/upload-artifact@v2
-      with:
-        name: AudioPlaybackConnector32
-        path: Release/AudioPlaybackConnector32.pdb
-    - uses: actions/upload-artifact@v2
-      with:
-        name: AudioPlaybackConnectorARM64
-        path: ARM64/Release/AudioPlaybackConnectorARM64.exe
-    - uses: actions/upload-artifact@v2
-      with:
-        name: AudioPlaybackConnectorARM64
-        path: ARM64/Release/AudioPlaybackConnectorARM64.pdb
-    - uses: actions/upload-artifact@v2
-      with:
-        name: AudioPlaybackConnectorARM
-        path: ARM/Release/AudioPlaybackConnectorARM.exe
-    - uses: actions/upload-artifact@v2
-      with:
-        name: AudioPlaybackConnectorARM
-        path: ARM/Release/AudioPlaybackConnectorARM.pdb
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: ${{ github.ref }}
-        draft: true
-        prerelease: false
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: x64/Release/AudioPlaybackConnector64.exe
-        asset_name: AudioPlaybackConnector64.exe
-        asset_content_type: application/octet-stream
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: Release/AudioPlaybackConnector32.exe
-        asset_name: AudioPlaybackConnector32.exe
-        asset_content_type: application/octet-stream
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ARM64/Release/AudioPlaybackConnectorARM64.exe
-        asset_name: AudioPlaybackConnectorARM64.exe
-        asset_content_type: application/octet-stream
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ARM/Release/AudioPlaybackConnectorARM.exe
-        asset_name: AudioPlaybackConnectorARM.exe
-        asset_content_type: application/octet-stream
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate translation resources
+        shell: bash
+        run: |
+          set -e
+          python -m pip install -r translate/requirements.txt
+          (cd translate && ./gen_rc.sh)
+
+      - uses: nuget/setup-nuget@v2
+
+      - name: Restore NuGet packages
+        run: nuget restore AudioPlaybackConnector.sln
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build ${{ matrix.platform }}
+        run: msbuild AudioPlaybackConnector.sln -nologo -m "-p:Configuration=Release;Platform=${{ matrix.platform }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.outdir }}/${{ matrix.artifact }}.exe
+            ${{ matrix.outdir }}/${{ matrix.artifact }}.pdb
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
