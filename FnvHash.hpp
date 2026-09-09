@@ -1,9 +1,12 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 constexpr uint32_t FNV1_32_INIT = 0x811c9dc5;
 constexpr uint32_t FNV_32_PRIME = 0x01000193;
 
-uint32_t fnv1a_32(const void* buf, size_t len, uint32_t hval = FNV1_32_INIT)
+inline uint32_t fnv1a_32(const void* buf, size_t len, uint32_t hval = FNV1_32_INIT)
 {
 	auto p = reinterpret_cast<const uint8_t*>(buf);
 

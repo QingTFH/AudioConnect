@@ -1,6 +1,7 @@
-#pragma once
+#include "pch.h"
 
-// https://msdn.microsoft.com/en-us/magazine/mt763237
+#include "Util.h"
+
 std::wstring Utf8ToUtf16(std::string_view utf8)
 {
 	if (utf8.empty())
@@ -69,9 +70,7 @@ std::string Utf16ToUtf8(std::wstring_view utf16)
 	return utf8;
 }
 
-// https://docs.microsoft.com/en-us/windows/uwp/cpp-and-winrt-apis/author-coclasses#add-helper-types-and-functions
-// License: see the https://github.com/MicrosoftDocs/windows-uwp/blob/docs/LICENSE-CODE file
-auto GetModuleFsPath(HMODULE hModule)
+std::filesystem::path GetModuleFsPath(HMODULE hModule)
 {
 	std::wstring path(MAX_PATH, L'\0');
 	DWORD actualSize;
@@ -87,5 +86,12 @@ auto GetModuleFsPath(HMODULE hModule)
 	}
 
 	path.resize(actualSize);
-	return fs::path(path);
+	return std::filesystem::path(path);
+}
+
+bool IsSystemLightTheme()
+{
+	DWORD value = 0, cbValue = sizeof(value);
+	LOG_IF_WIN32_ERROR(RegGetValueW(HKEY_CURRENT_USER, LR"(Software\Microsoft\Windows\CurrentVersion\Themes\Personalize)", L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &cbValue));
+	return value != 0;
 }
