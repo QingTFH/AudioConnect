@@ -90,7 +90,7 @@ void ConnectionManager::CloseQuietly(std::shared_ptr<IAudioConnection> const& co
 winrt::fire_and_forget ConnectionManager::Connect(DeviceInformation device)
 {
 	const std::wstring deviceId(device.Id());
-	ConnectImpl(deviceId, std::move(device));
+	return ConnectImpl(deviceId, std::move(device));
 }
 
 winrt::fire_and_forget ConnectionManager::ConnectImpl(std::wstring deviceId, DeviceInformation device)
