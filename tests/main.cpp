@@ -128,10 +128,10 @@ static void TestI18nYmo()
 	});
 	LoadTranslateDataFromMemory(blob2.data(), blob2.size());
 	CHECK(wcscmp(Translate(L"Menu\004Open"), L"打开(&O)") == 0);
-	// TranslateContext(ctxt, str) 内部就是 Translate(ctxt\004str)：命中返回译文
-	CHECK(wcscmp(TranslateContext(L"Open", L"Menu"), L"打开(&O)") == 0);
+	// TranslateContext(str, ctxtStr)：ctxtStr 是 ctxt\004str 组合串（与 C_ 宏展开一致），命中返回译文
+	CHECK(wcscmp(TranslateContext(L"Open", L"Menu\004Open"), L"打开(&O)") == 0);
 	// 未命中时返回 str 本身
-	CHECK(wcscmp(TranslateContext(L"Open", L"Other"), L"Open") == 0);
+	CHECK(wcscmp(TranslateContext(L"Open", L"Other\004Open"), L"Open") == 0);
 
 	// 空数据 / 截断数据不能崩、不能装载任何条目
 	LoadTranslateDataFromMemory(nullptr, 0);
