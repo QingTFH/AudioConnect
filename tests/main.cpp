@@ -122,9 +122,9 @@ static void TestI18nYmo()
 	// 表里没有的原文原样返回
 	CHECK(wcscmp(Translate(L"Missing"), L"Missing") == 0);
 
-	// C_(ctxt, str)：按 (ctxt\004str) 组合查；表里有则命中，没有则返回 str 本身
+	// C_(ctxt, str)：按 (ctxt\004str) 组合串的哈希查；表里有则命中，没有则返回 str 本身
 	auto blob2 = BuildYmo({
-		{ L"打开(&O)", L"Open" },
+		{ L"打开(&O)", L"Menu\004Open" },
 	});
 	LoadTranslateDataFromMemory(blob2.data(), blob2.size());
 	CHECK(wcscmp(Translate(L"Open\004Open"), L"打开(&O)") == 0);
