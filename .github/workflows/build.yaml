@@ -22,12 +22,15 @@ jobs:
           # ARM（32 位）已移除：新版 MSVC 工具集不再提供 32 位 ARM 目标
           - platform: x86
             outdir: Release
+            bindir: Win32_Release
             artifact: AudioPlaybackConnector32
           - platform: x64
             outdir: x64/Release
+            bindir: x64_Release
             artifact: AudioPlaybackConnector64
           - platform: ARM64
             outdir: ARM64/Release
+            bindir: ARM64_Release
             artifact: AudioPlaybackConnectorARM64
 
     steps:
