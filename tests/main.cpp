@@ -120,15 +120,15 @@ static void TestI18nYmo()
 	CHECK(wcscmp(Translate(L"Hello"), L"你好") == 0);
 	CHECK(wcscmp(Translate(L"Goodbye"), L"再见") == 0);
 	// 表里没有的原文原样返回
-	CHECK(Translate(L"Missing") == L"Missing");
+	CHECK(wcscmp(Translate(L"Missing"), L"Missing") == 0);
 
 	// C_(ctxt, str)：按 (ctxt\004str) 组合查；表里有则命中，没有则返回 str 本身
 	auto blob2 = BuildYmo({
 		{ L"打开(&O)", L"Open" },
 	});
 	LoadTranslateDataFromMemory(blob2.data(), blob2.size());
-	CHECK(Translate(L"Open\004Open") == L"打开(&O)");
-	CHECK(TranslateContext(L"Open", L"Menu") == L"Open");
+	CHECK(wcscmp(Translate(L"Open\004Open"), L"打开(&O)") == 0);
+	CHECK(wcscmp(TranslateContext(L"Open", L"Menu"), L"Open") == 0);
 
 	// 空数据 / 截断数据不能崩、不能装载任何条目
 	LoadTranslateDataFromMemory(nullptr, 0);
