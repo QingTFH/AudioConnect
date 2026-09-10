@@ -10,6 +10,7 @@
 #include "SvgIcon.h"
 #include "TrayIcon.h"
 #include "Util.h"
+#include "WinrtAudioConnection.h"
 
 namespace
 {
@@ -23,7 +24,8 @@ namespace
 	DevicePicker g_devicePicker = nullptr;
 	UINT g_wmTaskbarCreated = 0;
 
-	ConnectionManager g_connections;
+	// 工厂注入（step13a）：静态初始化期只构造对象、不调 WinRT，安全。
+	ConnectionManager g_connections{ std::make_unique<WinrtConnectionFactory>() };
 	TrayIcon g_trayIcon;
 	TrayIcons g_trayIcons;
 	SettingsData g_settings;

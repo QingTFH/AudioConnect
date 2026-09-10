@@ -1,7 +1,7 @@
 // 零依赖单元测试：不引第三方框架，断言失败即累计计数，
 // main 返回非 0 让 CI 直接失败。
 // 覆盖：FNV-1a、Utf8/Utf16 往返、YMO 解析与查表、Settings 读写往返、
-// 日志行格式化与拼接、连接状态标签映射。
+// 日志行格式化与拼接、连接状态标签映射、连接路径（mock 工厂，见 ConnectionManagerTests.cpp）。
 
 #include "../pch.h"
 
@@ -15,8 +15,11 @@
 #include <iostream>
 #include <string>
 
-static int g_checks = 0;
-static int g_failures = 0;
+// 计数器与 ConnectionManagerTests.cpp 共享（非 static）。
+int g_checks = 0;
+int g_failures = 0;
+
+int RunConnectionManagerTests();
 
 #define WIDEN2(x) L##x
 #define WIDEN(x) WIDEN2(x)
@@ -237,6 +240,7 @@ int wmain()
 	TestLogFormat();
 	TestLogCompose();
 	TestConnectionStatusName();
+	RunConnectionManagerTests();
 
 	std::wcout << L"checks=" << g_checks << L" failures=" << g_failures << std::endl;
 	winrt::uninit_apartment();

@@ -111,6 +111,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="ConnectionManagerTests.cpp" />
+    <ClCompile Include="..\ConnectionManager.cpp" />
     <ClCompile Include="..\Util.cpp" />
     <ClCompile Include="..\I18n.cpp" />
     <ClCompile Include="..\Log.cpp" />
@@ -118,8 +120,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\pch.h" />
+    <ClInclude Include="..\AsyncOp.hpp" />
+    <ClInclude Include="..\AudioConnection.h" />
     <ClInclude Include="..\ConnectionManager.h" />
     <ClInclude Include="..\FnvHash.hpp" />
+    <ClInclude Include="MockAudioConnection.h" />
     <ClInclude Include="..\Util.h" />
     <ClInclude Include="..\I18n.h" />
     <ClInclude Include="..\Log.h" />

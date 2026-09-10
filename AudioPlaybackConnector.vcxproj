@@ -331,6 +331,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="AudioPlaybackConnector.h" />
+    <ClInclude Include="AsyncOp.hpp" />
+    <ClInclude Include="AudioConnection.h" />
     <ClInclude Include="ConnectionManager.h" />
     <ClInclude Include="Direct2DSvg.hpp" />
     <ClInclude Include="FnvHash.hpp" />
@@ -344,6 +346,7 @@
     <ClInclude Include="targetver.h" />
     <ClInclude Include="TrayIcon.h" />
     <ClInclude Include="Util.h" />
+    <ClInclude Include="WinrtAudioConnection.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AudioPlaybackConnector.cpp" />
@@ -355,6 +358,7 @@
     <ClCompile Include="SvgIcon.cpp" />
     <ClCompile Include="TrayIcon.cpp" />
     <ClCompile Include="Util.cpp" />
+    <ClCompile Include="WinrtAudioConnection.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">Create</PrecompiledHeader>
