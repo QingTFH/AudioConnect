@@ -33,14 +33,20 @@ public:
 	void OnConnectionStatus(const DeviceInformation& device, ConnectionStatus status, const std::wstring& message);
 
 private:
+	// 注意：DeviceInformation 没有默认构造函数（C++/WinRT 投影类型只用
+	// nullptr 构造或从 ABI 指针构造），所以 DeviceEntry 不能靠"先默认构造
+	// 再赋值"，一律走 MakeEntry。
 	struct DeviceEntry
 	{
-		DeviceInformation device;   // 可能为空：仅由状态回调补入、还没被枚举到
+		DeviceInformation device;
 		std::wstring id;
 		std::wstring name;
-		ConnectionStatus status = ConnectionStatus::Closed;
+		ConnectionStatus status;
 		std::wstring message;
 	};
+
+	static DeviceEntry MakeEntry(const DeviceInformation& device);
+	static std::wstring StatusText(const DeviceEntry& entry);
 
 	static LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 	LRESULT WndProc(UINT message, WPARAM wParam, LPARAM lParam);
@@ -56,8 +62,6 @@ private:
 	DeviceEntry* FindEntry(std::wstring_view id);
 	UINT Dpi() const;
 
-	static std::wstring StatusText(const DeviceEntry& entry);
-
 	HINSTANCE m_hInst = nullptr;
 	HWND m_hWnd = nullptr;
 	HWND m_hList = nullptr;
@@ -66,6 +70,7 @@ private:
 
 	bool m_refreshing = false;
 	bool m_activated = false;      // 是否真正拿到过激活（SetForegroundWindow 可能失败）
+	int m_columnDpi = 0;           // 列宽上次生效的 DPI，只在 DPI 变化时重设
 	RECT m_anchor = {};
 	ULONGLONG m_lastAutoHideTick = 0;
 };

@@ -23,8 +23,6 @@ namespace
 
 	// 因失活而自动隐藏后，多久之内收到的托盘点击视为"这次点击就是来关它的"。
 	constexpr ULONGLONG kTrayToggleGraceMs = 300;
-
-	constexpr LPARAM kPlaceholderRow = -1;
 }
 
 bool DeviceListWindow::Register(HINSTANCE hInst)
@@ -196,8 +194,12 @@ void DeviceListWindow::PositionWindow(int width, int height)
 
 	const int minX = static_cast<int>(work.left) + margin;
 	const int minY = static_cast<int>(work.top) + margin;
-	const int maxX = std::max(minX, static_cast<int>(work.right) - margin - width);
-	const int maxY = std::max(minY, static_cast<int>(work.bottom) - margin - height);
+	int maxX = static_cast<int>(work.right) - margin - width;
+	int maxY = static_cast<int>(work.bottom) - margin - height;
+	if (maxX < minX)
+		maxX = minX;
+	if (maxY < minY)
+		maxY = minY;
 
 	x = std::clamp(x, minX, maxX);
 	y = std::clamp(y, minY, maxY);
@@ -215,11 +217,11 @@ void DeviceListWindow::RebuildList()
 
 	if (m_devices.empty())
 	{
+		// 占位行的行号是 0，而 m_devices 为空，ActivateItem 的范围检查会挡掉它。
 		LVITEMW placeholder = {};
-		placeholder.mask = LVIF_TEXT | LVIF_PARAM;
+		placeholder.mask = LVIF_TEXT;
 		placeholder.iItem = 0;
 		placeholder.pszText = const_cast<LPWSTR>(_(L"No devices found"));
-		placeholder.lParam = kPlaceholderRow;
 		ListView_InsertItem(m_hList, &placeholder);
 	}
 	else
@@ -229,10 +231,9 @@ void DeviceListWindow::RebuildList()
 			const DeviceEntry& entry = m_devices[i];
 
 			LVITEMW item = {};
-			item.mask = LVIF_TEXT | LVIF_PARAM;
+			item.mask = LVIF_TEXT;
 			item.iItem = static_cast<int>(i);
 			item.pszText = const_cast<LPWSTR>(entry.name.c_str());
-			item.lParam = static_cast<LPARAM>(i);
 			ListView_InsertItem(m_hList, &item);
 
 			const std::wstring status = StatusText(entry);
@@ -279,12 +280,7 @@ winrt::fire_and_forget DeviceListWindow::RefreshDevices()
 		merged.reserve(devices.Size());
 		for (const DeviceInformation& device : devices)
 		{
-			DeviceEntry entry;
-			entry.device = device;
-			entry.id = std::wstring(device.Id());
-			entry.name = std::wstring(device.Name());
-			if (entry.name.empty())
-				entry.name = entry.id;
+			DeviceEntry entry = MakeEntry(device);
 			if (const DeviceEntry* previous = FindEntry(entry.id))
 			{
 				entry.status = previous->status;
@@ -326,6 +322,16 @@ DeviceListWindow::DeviceEntry* DeviceListWindow::FindEntry(std::wstring_view id)
 	return nullptr;
 }
 
+DeviceListWindow::DeviceEntry DeviceListWindow::MakeEntry(const DeviceInformation& device)
+{
+	std::wstring id(device.Id());
+	std::wstring name(device.Name());
+	if (name.empty())
+		name = id;
+
+	return DeviceEntry{ device, std::move(id), std::move(name), ConnectionStatus::Closed, {} };
+}
+
 std::wstring DeviceListWindow::StatusText(const DeviceEntry& entry)
 {
 	switch (entry.status)
@@ -349,13 +355,7 @@ void DeviceListWindow::OnConnectionStatus(const DeviceInformation& device, Conne
 	DeviceEntry* entry = FindEntry(id);
 	if (!entry)
 	{
-		DeviceEntry created;
-		created.device = device;
-		created.id = id;
-		created.name = std::wstring(device.Name());
-		if (created.name.empty())
-			created.name = id;
-		m_devices.push_back(std::move(created));
+		m_devices.push_back(MakeEntry(device));
 		entry = &m_devices.back();
 	}
 
@@ -429,8 +429,9 @@ LRESULT DeviceListWindow::WndProc(UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			if (header->code == LVN_ITEMACTIVATE)
 			{
+				// 行号就是 m_devices 下标（RebuildList 按同序插入）。
 				const auto activated = reinterpret_cast<const NMLISTVIEW*>(lParam);
-				ActivateItem(static_cast<int>(ListView_GetItemData(m_hList, activated->iItem)));
+				ActivateItem(activated->iItem);
 			}
 			else if (header->code == LVN_KEYDOWN)
 			{
