@@ -53,8 +53,16 @@ public:
 	winrt::fire_and_forget Connect(DeviceInformation device);
 	winrt::fire_and_forget ConnectById(std::wstring deviceId);
 
-	// 主动断开；设备不在表中返回 false。
-	bool Disconnect(std::wstring_view deviceId);
+	// 主动断开。
+	//
+	// 设备在表中（正常路径）：摘出条目并 Close()。
+	// 设备不在表中也要处理：最典型的场景是**应用重启过**（表随之清空），而 Windows 侧
+	// 仍持有这条 A2DP sink 连接。此时若直接返回，界面上的"断开连接"按钮点下去毫无
+	// 反应，用户从本程序侧没有任何办法断开它。这里改用调用方手上的 DeviceInformation
+	// 现造一个连接对象关掉。
+	//
+	// 返回是否真的对底层做了关闭动作（界面复位与它无关，两条路径都会复位）。
+	bool Disconnect(const DeviceInformation& device);
 
 	// 关闭并上报全部连接，随后清空。
 	void CloseAll();

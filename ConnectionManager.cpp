@@ -244,22 +244,52 @@ winrt::fire_and_forget ConnectionManager::ConnectById(std::wstring deviceId)
 	}
 }
 
-bool ConnectionManager::Disconnect(std::wstring_view deviceId)
+bool ConnectionManager::Disconnect(const DeviceInformation& device)
 {
-	auto it = m_connections.find(std::wstring(deviceId));
-	if (it == m_connections.end())
+	const std::wstring deviceId(device.Id());
+	logger::Write(logger::Compose(L"Disconnect: enter ", DescribeDevice(device)));
+
+	if (auto it = m_connections.find(deviceId); it != m_connections.end())
 	{
-		logger::Write(logger::Compose(L"Disconnect: no such entry id=", deviceId));
-		return false;
+		// 先摘出，再 Close()：关闭过程中同步派发的 StateChanged 在表里已经
+		// 找不到条目，不会二次摘除（E2）。
+		auto entry = TakeOut(it);
+		logger::Write(logger::Compose(L"Disconnect: closing tracked entry ", DescribeDevice(entry.device)));
+		CloseQuietly(entry.connection);
+		Report(entry.device, ConnectionStatus::Closed);
+		return true;
 	}
 
-	// 先摘出（并撤销订阅），再 Close()：关闭过程中同步派发的 StateChanged
-	// 在表里已经找不到条目，不会二次 erase。
-	auto entry = TakeOut(it);
-	logger::Write(logger::Compose(L"Disconnect: closing ", DescribeDevice(entry.device)));
-	CloseQuietly(entry.connection);
-	Report(entry.device, ConnectionStatus::Closed);
-	return true;
+	// 表里没有这个设备。这里【不能】直接返回 false —— 最典型的场景是应用重启过
+	// （表随之清空），而 Windows 侧仍持有这条 A2DP sink 连接：用户点了"断开连接"
+	// 却什么也没发生，从本程序侧没有任何手段断开它。用调用方手上的 DeviceInformation
+	// 现造一个对象关掉它。
+	logger::Write(L"Disconnect: no tracked entry, closing a fresh instance");
+	bool closed = false;
+
+	try
+	{
+		auto connection = AudioPlaybackConnection::TryCreateFromId(device.Id());
+		if (connection)
+		{
+			CloseQuietly(connection);
+			closed = true;
+		}
+		else
+		{
+			logger::Write(L"Disconnect: TryCreateFromId returned null");
+		}
+	}
+	catch (winrt::hresult_error const& ex)
+	{
+		logger::Write(logger::Compose(L"Disconnect: fresh instance failed ", FormatHresultError(ex)));
+		LOG_CAUGHT_EXCEPTION();
+	}
+
+	// 无论底层是否真的关掉了，界面这一行都必须复位：否则按钮会一直停在
+	// "已连接 / 可断开"的样子，用户只能反复点。
+	Report(device, ConnectionStatus::Closed);
+	return closed;
 }
 
 void ConnectionManager::CloseAll()

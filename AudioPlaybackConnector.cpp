@@ -387,7 +387,9 @@ namespace
 			g_connections.Connect(args.SelectedDevice());
 		});
 		g_devicePicker.DisconnectButtonClicked([](const auto&, const auto& args) {
-			g_connections.Disconnect(args.Device().Id());
+			// 传整个 DeviceInformation 而不只是 Id：设备不在表里时（典型是应用重启后
+			// 表已清空、而 Windows 侧仍连着），管理器要靠它现造对象才能把连接关掉。
+			g_connections.Disconnect(args.Device());
 		});
 	}
 
