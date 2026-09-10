@@ -113,13 +113,16 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="..\Util.cpp" />
     <ClCompile Include="..\I18n.cpp" />
+    <ClCompile Include="..\Log.cpp" />
     <ClCompile Include="..\Settings.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\pch.h" />
+    <ClInclude Include="..\ConnectionManager.h" />
     <ClInclude Include="..\FnvHash.hpp" />
     <ClInclude Include="..\Util.h" />
     <ClInclude Include="..\I18n.h" />
+    <ClInclude Include="..\Log.h" />
     <ClInclude Include="..\Settings.h" />
   </ItemGroup>
   <Import Project="$(SolutionDir)packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('$(SolutionDir)packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props')" />

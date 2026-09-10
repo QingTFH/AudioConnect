@@ -335,6 +335,7 @@
     <ClInclude Include="Direct2DSvg.hpp" />
     <ClInclude Include="FnvHash.hpp" />
     <ClInclude Include="I18n.h" />
+    <ClInclude Include="Log.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="Settings.h" />
@@ -348,6 +349,7 @@
     <ClCompile Include="AudioPlaybackConnector.cpp" />
     <ClCompile Include="ConnectionManager.cpp" />
     <ClCompile Include="I18n.cpp" />
+    <ClCompile Include="Log.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="Singleton.cpp" />
     <ClCompile Include="SvgIcon.cpp" />

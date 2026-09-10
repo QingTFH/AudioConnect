@@ -1,11 +1,14 @@
 // 零依赖单元测试：不引第三方框架，断言失败即累计计数，
 // main 返回非 0 让 CI 直接失败。
-// 覆盖：FNV-1a、Utf8/Utf16 往返、YMO 解析与查表、Settings 读写往返。
+// 覆盖：FNV-1a、Utf8/Utf16 往返、YMO 解析与查表、Settings 读写往返、
+// 日志行格式化与拼接、连接状态标签映射。
 
 #include "../pch.h"
 
+#include "../ConnectionManager.h"
 #include "../FnvHash.hpp"
 #include "../I18n.h"
+#include "../Log.h"
 #include "../Settings.h"
 #include "../Util.h"
 
@@ -188,6 +191,40 @@ static void TestGetModuleFsPath()
 	CHECK(std::filesystem::exists(exe));
 }
 
+static void TestLogFormat()
+{
+	logger::Timestamp ts{ 2026, 9, 10, 15, 23, 29, 7 };
+	CHECK(logger::FormatLogLine(ts, 4294967295u, L"hello") == L"2026-09-10 15:23:29.007 [4294967295] hello");
+
+	// 各字段补零
+	logger::Timestamp zero{ 2000, 1, 1, 0, 0, 0, 0 };
+	CHECK(logger::FormatLogLine(zero, 0, L"") == L"2000-01-01 00:00:00.000 [0] ");
+
+	// 中文与内嵌引号原样保留
+	CHECK(logger::FormatLogLine(ts, 12345, L"设备 \"A2DP SNK\" 已连接") == L"2026-09-10 15:23:29.007 [12345] 设备 \"A2DP SNK\" 已连接");
+}
+
+static void TestLogCompose()
+{
+	CHECK(logger::Compose() == L"");
+
+	// const wchar_t* 片段
+	CHECK(logger::Compose(L"a", L"bc", L"d") == L"abcd");
+
+	// std::wstring 与 std::wstring_view 混用
+	std::wstring tail = L"-tail";
+	std::wstring_view middle = L"-mid";
+	CHECK(logger::Compose(L"head", middle, tail) == L"head-mid-tail");
+}
+
+static void TestConnectionStatusName()
+{
+	CHECK(wcscmp(ConnectionStatusName(ConnectionStatus::Connecting), L"connecting") == 0);
+	CHECK(wcscmp(ConnectionStatusName(ConnectionStatus::Connected), L"connected") == 0);
+	CHECK(wcscmp(ConnectionStatusName(ConnectionStatus::Failed), L"failed") == 0);
+	CHECK(wcscmp(ConnectionStatusName(ConnectionStatus::Closed), L"closed") == 0);
+}
+
 int wmain()
 {
 	winrt::init_apartment(winrt::apartment_type::single_threaded);
@@ -197,6 +234,9 @@ int wmain()
 	TestI18nYmo();
 	TestSettingsRoundtrip();
 	TestGetModuleFsPath();
+	TestLogFormat();
+	TestLogCompose();
+	TestConnectionStatusName();
 
 	std::wcout << L"checks=" << g_checks << L" failures=" << g_failures << std::endl;
 	winrt::uninit_apartment();

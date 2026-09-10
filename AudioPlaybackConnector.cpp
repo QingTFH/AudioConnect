@@ -4,6 +4,7 @@
 
 #include "ConnectionManager.h"
 #include "I18n.h"
+#include "Log.h"
 #include "Settings.h"
 #include "Singleton.h"
 #include "SvgIcon.h"
@@ -47,6 +48,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	UNREFERENCED_PARAMETER(nCmdShow);
 
 	g_hInst = hInstance;
+
+	// 日志要在任何可能出问题的步骤之前就绪，包括单实例判定。
+	logger::SetLogFile(GetSettingsPath(g_hInst).parent_path() / std::filesystem::path(logger::kLogFileName));
+	logger::Write(L"=== AudioPlaybackConnector start ===");
 
 	// 必须放在最前面：第二个实例在这里就退出了，不碰任何全局资源。
 	SingleInstanceGuard instanceGuard;
@@ -125,6 +130,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		}
 	}
 
+	logger::Write(L"=== AudioPlaybackConnector stop ===");
+	logger::Shutdown();
+
 	return static_cast<int>(msg.wParam);
 }
 
@@ -173,6 +181,9 @@ namespace
 		{
 			// 勾选了"下次启动重连"才把当前设备写进配置，否则落盘空列表。
 			g_settings.lastDevices = g_settings.reconnect ? g_connections.DeviceIds() : std::vector<std::wstring>{};
+			logger::Write(logger::Compose(
+				L"WM_DESTROY: exiting, reconnect=", g_settings.reconnect ? L"true" : L"false",
+				L" lastDevices=", std::to_wstring(g_settings.lastDevices.size())));
 			SaveSettings(GetSettingsPath(g_hInst), g_settings);
 
 			g_connections.CloseAll();
@@ -225,8 +236,12 @@ namespace
 		case WM_CONNECTDEVICE:
 			if (g_settings.reconnect)
 			{
+				logger::Write(logger::Compose(
+					L"WM_CONNECTDEVICE: reconnect count=", std::to_wstring(g_settings.lastDevices.size())));
+
 				for (const auto& id : g_settings.lastDevices)
 				{
+					logger::Write(logger::Compose(L"WM_CONNECTDEVICE: reconnect id=", id));
 					g_connections.ConnectById(id);
 				}
 				g_settings.lastDevices.clear();
