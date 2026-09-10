@@ -82,7 +82,7 @@ static std::vector<uint8_t> BuildYmo(std::initializer_list<std::pair<std::wstrin
 	append16(static_cast<uint16_t>(pairs.size()));
 	// 先占位表项，payload 偏移之后再回填
 	std::vector<size_t> offsets;
-	for (const auto& p : pairs)
+	for (size_t i = 0; i < pairs.size(); ++i)
 	{
 		append32(0);
 		append16(0);
