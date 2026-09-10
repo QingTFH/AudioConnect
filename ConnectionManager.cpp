@@ -158,7 +158,7 @@ winrt::fire_and_forget ConnectionManager::ConnectImpl(std::wstring deviceId, Dev
 			case OpenResultKind::UnknownFailure:
 				success = false;
 				// 与接口化之前一致：UnknownFailure 在此抛出，日志行已先打印。
-				winrt::throw_hresult(winrt::hresult{ outcome.extendedError });
+				winrt::throw_hresult(winrt::hresult{ static_cast<int32_t>(outcome.extendedError) });
 				break;
 			}
 		}

@@ -186,7 +186,7 @@ namespace
 	{
 		Harness h;
 		h.factory->onCreate = [](MockAudioConnection& m) {
-			m.openOutcome = OpenOutcome{ OpenResultKind::UnknownFailure, 0x80070005 };
+			m.openOutcome = OpenOutcome{ OpenResultKind::UnknownFailure, 0x80070005u };
 		};
 
 		h.mgr->ConnectImpl(L"dev1", NullDevice());
@@ -203,7 +203,8 @@ namespace
 	{
 		Harness h;
 		h.factory->onCreate = [](MockAudioConnection& m) {
-			m.openError = std::make_exception_ptr(winrt::hresult_error(winrt::hresult{ 0x80004005 }));
+			m.openError = std::make_exception_ptr(
+				winrt::hresult_error(winrt::hresult{ static_cast<int32_t>(0x80004005) }));
 		};
 
 		h.mgr->ConnectImpl(L"dev1", NullDevice());
@@ -219,7 +220,8 @@ namespace
 	{
 		Harness h;
 		h.factory->onCreate = [](MockAudioConnection& m) {
-			m.startError = std::make_exception_ptr(winrt::hresult_error(winrt::hresult{ 0x80070490 }));
+			m.startError = std::make_exception_ptr(
+				winrt::hresult_error(winrt::hresult{ static_cast<int32_t>(0x80070490) }));
 		};
 
 		h.mgr->ConnectImpl(L"dev1", NullDevice());
