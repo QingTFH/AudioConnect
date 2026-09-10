@@ -7,6 +7,7 @@
 #include "ExitConfirm.h"
 #include "I18n.h"
 #include "Settings.h"
+#include "Singleton.h"
 #include "SvgIcon.h"
 #include "TrayIcon.h"
 #include "TrayMenu.h"
@@ -28,6 +29,7 @@ namespace
 	void UpdateNotifyIcon();
 	void ApplyConnectionStatus(const DeviceInformation& device, ConnectionStatus status, const std::wstring& message);
 	void ToggleDeviceList(POINT fallbackPoint);
+	void ShowDeviceListFromTray();
 	void OnTrayContextMenu(POINT point);
 	void RequestExit();
 	void OpenBluetoothSettings();
@@ -44,6 +46,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	UNREFERENCED_PARAMETER(nCmdShow);
 
 	g_hInst = hInstance;
+
+	// 必须放在最前面：第二个实例在这里就退出了，不碰任何全局资源。
+	SingleInstanceGuard instanceGuard;
+	if (!instanceGuard.TryAcquire())
+	{
+		if (!instanceGuard.NotifyExistingInstance())
+		{
+			LOG_LAST_ERROR();
+		}
+		return EXIT_SUCCESS;
+	}
 
 	winrt::init_apartment();
 
@@ -68,14 +81,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		.hInstance = hInstance,
 		.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_AUDIOPLAYBACKCONNECTOR)),
 		.hCursor = LoadCursorW(nullptr, IDC_ARROW),
-		.lpszClassName = L"AudioPlaybackConnector",
+		.lpszClassName = kMainWindowClassName,
 		.hIconSm = wcex.hIcon
 	};
 
 	RegisterClassExW(&wcex);
 
 	// 纯消息窗口：只用来收托盘回调，从不 ShowWindow。
-	g_hWnd = CreateWindowExW(0, L"AudioPlaybackConnector", nullptr, WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, hInstance, nullptr);
+	g_hWnd = CreateWindowExW(0, kMainWindowClassName, nullptr, WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, hInstance, nullptr);
 	FAIL_FAST_LAST_ERROR_IF_NULL(g_hWnd);
 
 	if (!g_deviceList.Register(hInstance))
@@ -139,6 +152,19 @@ namespace
 			iconRect = actualRect;
 
 		g_deviceList.ToggleFromTray(iconRect);
+	}
+
+	void ShowDeviceListFromTray()
+	{
+		RECT iconRect = {};
+		const HRESULT hr = g_trayIcon.GetRect(iconRect);
+		if (FAILED(hr))
+		{
+			LOG_HR(hr);
+			return;
+		}
+
+		g_deviceList.Show(iconRect);
 	}
 
 	void OnTrayContextMenu(POINT point)
@@ -225,6 +251,11 @@ namespace
 			}
 			break;
 		}
+		case WM_SHOWDEVICES:
+			// 第二个实例被启动：把设备列表弹出来。这里是"确保可见"而不是切换，
+			// 否则用户双击两次反而会把已经打开的列表关掉。
+			ShowDeviceListFromTray();
+			break;
 		case WM_CONNECTDEVICE:
 			if (g_settings.reconnect)
 			{

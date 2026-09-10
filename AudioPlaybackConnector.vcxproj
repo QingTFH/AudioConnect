@@ -340,6 +340,7 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="Settings.h" />
+    <ClInclude Include="Singleton.h" />
     <ClInclude Include="SvgIcon.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="TrayIcon.h" />
@@ -353,6 +354,7 @@
     <ClCompile Include="ExitConfirm.cpp" />
     <ClCompile Include="I18n.cpp" />
     <ClCompile Include="Settings.cpp" />
+    <ClCompile Include="Singleton.cpp" />
     <ClCompile Include="SvgIcon.cpp" />
     <ClCompile Include="TrayIcon.cpp" />
     <ClCompile Include="TrayMenu.cpp" />
