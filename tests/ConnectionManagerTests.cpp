@@ -9,6 +9,7 @@
 #include "MockAudioConnection.h"
 
 #include <exception>
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -227,7 +228,10 @@ namespace
 		h.mgr->ConnectImpl(L"dev1", NullDevice());
 
 		auto mock = h.factory->created.back();
-		CHECK(mock->callLog.size() == 1); // 只 Start，没 Open
+		// callLog = ["Start", "Close"]：收尾摘出条目并 Close；关键是不出现 "Open"。
+		CHECK(mock->callLog.size() == 2);
+		CHECK(mock->callLog[0] == L"Start");
+		CHECK(std::find(mock->callLog.begin(), mock->callLog.end(), L"Open") == mock->callLog.end());
 		CHECK(h.Count(ConnectionStatus::Failed) == 1);
 		CHECK(h.mgr->IsEmpty());
 		CHECK(mock->closeCount == 1);
