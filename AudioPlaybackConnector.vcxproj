@@ -332,7 +332,9 @@
   <ItemGroup>
     <ClInclude Include="AudioPlaybackConnector.h" />
     <ClInclude Include="ConnectionManager.h" />
+    <ClInclude Include="DeviceListWindow.h" />
     <ClInclude Include="Direct2DSvg.hpp" />
+    <ClInclude Include="ExitConfirm.h" />
     <ClInclude Include="FnvHash.hpp" />
     <ClInclude Include="I18n.h" />
     <ClInclude Include="pch.h" />
@@ -341,15 +343,19 @@
     <ClInclude Include="SvgIcon.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="TrayIcon.h" />
+    <ClInclude Include="TrayMenu.h" />
     <ClInclude Include="Util.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AudioPlaybackConnector.cpp" />
     <ClCompile Include="ConnectionManager.cpp" />
+    <ClCompile Include="DeviceListWindow.cpp" />
+    <ClCompile Include="ExitConfirm.cpp" />
     <ClCompile Include="I18n.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="SvgIcon.cpp" />
     <ClCompile Include="TrayIcon.cpp" />
+    <ClCompile Include="TrayMenu.cpp" />
     <ClCompile Include="Util.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>

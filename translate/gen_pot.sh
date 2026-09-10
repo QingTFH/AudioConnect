@@ -1,6 +1,6 @@
 #!/bin/sh
 
-FILES="AudioPlaybackConnector.cpp ConnectionManager.cpp"
+FILES="AudioPlaybackConnector.cpp ConnectionManager.cpp DeviceListWindow.cpp ExitConfirm.cpp TrayMenu.cpp"
 
 COPYRIGHT_HOLDER="Richard Yu <yurichard3839@gmail.com>"
 PKG_NAME="AudioPlaybackConnector"

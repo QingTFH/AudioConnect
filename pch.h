@@ -20,6 +20,7 @@
 #include <shlwapi.h>
 
 // C++ RunTime Header Files
+#include <algorithm>
 #include <cstdlib>
 #include <cstdint>
 #include <string>
@@ -41,17 +42,13 @@
 // Fixes warning C4002: too many arguments for function-like macro invocation 'GetCurrentTime'
 #undef GetCurrentTime
 
+// 只保留非 UI 的 WinRT 能力：设备枚举、A2DP Sink 连接、版本探测。
+// UI 全部走原生 Win32，因此不再引入 Windows.UI.Xaml.*（任务 11）。
 #include <winrt/base.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Devices.Enumeration.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Foundation.Metadata.h>
 #include <winrt/Windows.Media.Audio.h>
-#include <winrt/Windows.System.h>
-#include <winrt/Windows.UI.Xaml.Controls.h>
-#include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
-#include <winrt/Windows.UI.Xaml.Hosting.h>
-#include <windows.ui.xaml.hosting.desktopwindowxamlsource.h>
-#include <winrt/Windows.UI.Xaml.Markup.h>
 
 #endif //PCH_H

@@ -69,3 +69,21 @@ msgstr "未知錯誤"
 #: AudioPlaybackConnector.cpp:362
 msgid "Connected"
 msgstr "已連線"
+
+msgid "Device"
+msgstr "裝置"
+
+msgid "Status"
+msgstr "狀態"
+
+msgid "Not connected"
+msgstr "未連線"
+
+msgid "No devices found"
+msgstr "未找到裝置"
+
+msgid "Failed"
+msgstr "失敗"
+
+msgid "Cancel"
+msgstr "取消"

@@ -67,3 +67,21 @@ msgstr ""
 #: AudioPlaybackConnector.cpp:362
 msgid "Connected"
 msgstr ""
+
+msgid "Device"
+msgstr ""
+
+msgid "Status"
+msgstr ""
+
+msgid "Not connected"
+msgstr ""
+
+msgid "No devices found"
+msgstr ""
+
+msgid "Failed"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
