@@ -67,6 +67,8 @@ private:
 	{
 		DeviceInformation device;
 		AudioPlaybackConnection connection;
+		// 订阅令牌仅作记录，刻意不用于撤销：在 StateChanged 回调里撤销订阅会
+		// 破坏 C++/WinRT 的 handler 容器（实测 0xC0000374）。详见 .cpp。
 		winrt::event_token stateChangedToken{};
 		uint32_t generation = 0;
 		bool opening = false;           // Connect() 协程还没拿到 OpenAsync 结果
@@ -78,13 +80,13 @@ private:
 	void OnStateChanged(const AudioPlaybackConnection& sender, uint32_t generation);
 	void Report(const DeviceInformation& device, ConnectionStatus status, const std::wstring& message = {});
 
-	// 从表中摘出条目（顺带撤销事件订阅），由调用方决定是否 Close()。
+	// 从表中摘出条目，由调用方决定是否 Close()。
 	// 必须先摘出再 Close：Close 可能同步派发 StateChanged，此时表里已无该条目，
 	// OnStateChanged 自然找不到，不会二次 erase。
+	// 刻意【不】撤销事件订阅 —— 见 .cpp 中 TakeOut 的说明（回调中撤销会堆损坏）。
 	ConnectionEntry TakeOut(ConnectionMap::iterator it);
 
-	// 撤销 / 关闭都不允许把异常抛到调用方（fire_and_forget 里就是 terminate）。
-	static void RevokeQuietly(ConnectionEntry& entry);
+	// Close 不允许把异常抛到调用方（fire_and_forget 里就是 terminate）。
 	static void CloseQuietly(AudioPlaybackConnection& connection);
 
 	ConnectionMap m_connections;

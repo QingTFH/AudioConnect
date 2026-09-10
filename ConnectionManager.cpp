@@ -83,23 +83,12 @@ ConnectionManager::ConnectionEntry ConnectionManager::TakeOut(ConnectionMap::ite
 	ConnectionEntry entry = std::move(it->second);
 	m_connections.erase(it);
 
-	// 先撤销订阅，再交还给调用方决定是否 Close()。
-	// 撤销之后，即便 Close() 同步派发 StateChanged，也不会再回到 OnStateChanged。
-	RevokeQuietly(entry);
+	// 刻意【不】撤销事件订阅。
+	// TakeOut 会被 OnStateChanged 自己调用，而在事件回调执行期间移除该订阅会让
+	// C++/WinRT 的 handler 容器迭代器失效 —— 实测崩溃：ntdll 0xC0000374 堆损坏。
+	// 不需要撤销：条目一旦离开表，迟到的回调会被 find 失败 / generation 校验挡掉；
+	// 连接对象析构时订阅自然解除。
 	return entry;
-}
-
-void ConnectionManager::RevokeQuietly(ConnectionEntry& entry)
-{
-	try
-	{
-		entry.connection.StateChanged(entry.stateChangedToken);
-	}
-	catch (winrt::hresult_error const& ex)
-	{
-		logger::Write(logger::Compose(L"Revoke StateChanged failed: ", FormatHresultError(ex)));
-		LOG_CAUGHT_EXCEPTION();
-	}
 }
 
 void ConnectionManager::CloseQuietly(AudioPlaybackConnection& connection)
@@ -285,7 +274,6 @@ void ConnectionManager::CloseAll()
 		auto& entry = pair.second;
 
 		logger::Write(logger::Compose(L"CloseAll: closing ", DescribeDevice(entry.device)));
-		RevokeQuietly(entry);
 		CloseQuietly(entry.connection);
 		Report(entry.device, ConnectionStatus::Closed);
 	}
@@ -345,6 +333,9 @@ void ConnectionManager::OnStateChanged(const AudioPlaybackConnection& sender, ui
 	}
 
 	const auto device = it->second.device;
+	// 这条路径【绝不能】撤销事件订阅：我们此刻正在这个回调内部执行，撤销会让
+	// C++/WinRT 的 handler 容器迭代器失效（实测 0xC0000374 堆损坏）。
+	// 摘出条目就够了 —— 之后的迟到回调会被 find 失败 / generation 校验挡掉。
 	TakeOut(it);
 	logger::Write(logger::Compose(L"StateChanged: entry removed ", DescribeDevice(device)));
 
