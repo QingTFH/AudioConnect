@@ -127,8 +127,11 @@ static void TestI18nYmo()
 		{ L"打开(&O)", L"Menu\004Open" },
 	});
 	LoadTranslateDataFromMemory(blob2.data(), blob2.size());
-	CHECK(wcscmp(Translate(L"Open\004Open"), L"打开(&O)") == 0);
-	CHECK(wcscmp(TranslateContext(L"Open", L"Menu"), L"Open") == 0);
+	CHECK(wcscmp(Translate(L"Menu\004Open"), L"打开(&O)") == 0);
+	// TranslateContext(ctxt, str) 内部就是 Translate(ctxt\004str)：命中返回译文
+	CHECK(wcscmp(TranslateContext(L"Open", L"Menu"), L"打开(&O)") == 0);
+	// 未命中时返回 str 本身
+	CHECK(wcscmp(TranslateContext(L"Open", L"Other"), L"Open") == 0);
 
 	// 空数据 / 截断数据不能崩、不能装载任何条目
 	LoadTranslateDataFromMemory(nullptr, 0);
