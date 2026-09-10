@@ -5,6 +5,9 @@
 using namespace winrt::Windows::Devices::Enumeration;
 using namespace winrt::Windows::Foundation;
 using namespace winrt::Windows::Media::Audio;
+using namespace winrt::Windows::UI::Xaml;
+using namespace winrt::Windows::UI::Xaml::Controls;
+using namespace winrt::Windows::UI::Xaml::Hosting;
 
 // 主消息窗口的窗口类名（单实例唤醒时用它 FindWindow）。
 constexpr wchar_t kMainWindowClassName[] = L"AudioPlaybackConnector";

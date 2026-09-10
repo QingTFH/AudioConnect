@@ -3,36 +3,37 @@
 #include "AudioPlaybackConnector.h"
 
 #include "ConnectionManager.h"
-#include "DeviceListWindow.h"
-#include "ExitConfirm.h"
 #include "I18n.h"
 #include "Settings.h"
 #include "Singleton.h"
 #include "SvgIcon.h"
 #include "TrayIcon.h"
-#include "TrayMenu.h"
 #include "Util.h"
 
 namespace
 {
 	HINSTANCE g_hInst;
 	HWND g_hWnd;
+	HWND g_hWndXaml;
+	Canvas g_xamlCanvas = nullptr;
+	Flyout g_xamlFlyout = nullptr;
+	MenuFlyout g_xamlMenu = nullptr;
+	FocusState g_menuFocusState = FocusState::Unfocused;
+	DevicePicker g_devicePicker = nullptr;
 	UINT g_wmTaskbarCreated = 0;
 
 	ConnectionManager g_connections;
-	DeviceListWindow g_deviceList;
 	TrayIcon g_trayIcon;
 	TrayIcons g_trayIcons;
 	SettingsData g_settings;
 
 	bool IsOsSupported();
+	void SetupFlyout();
+	void SetupMenu();
+	void SetupDevicePicker();
 	void UpdateNotifyIcon();
 	void ApplyConnectionStatus(const DeviceInformation& device, ConnectionStatus status, const std::wstring& message);
-	void ToggleDeviceList(POINT fallbackPoint);
-	void ShowDeviceListFromTray();
-	void OnTrayContextMenu(POINT point);
-	void RequestExit();
-	void OpenBluetoothSettings();
+	void ShowDevicePicker();
 	LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 }
 
@@ -69,10 +70,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		return EXIT_FAILURE;
 	}
 
-	// ListView 属于 comctl32，必须先初始化。
-	INITCOMMONCONTROLSEX commonControls = { sizeof(commonControls), ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES };
-	FAIL_FAST_IF_WIN32_BOOL_FALSE(InitCommonControlsEx(&commonControls));
-
 	g_settings = LoadSettings(GetSettingsPath(g_hInst));
 
 	WNDCLASSEXW wcex = {
@@ -87,18 +84,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 	RegisterClassExW(&wcex);
 
-	// 纯消息窗口：只用来收托盘回调，从不 ShowWindow。
-	g_hWnd = CreateWindowExW(0, kMainWindowClassName, nullptr, WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, hInstance, nullptr);
+	// When parent window size is 0x0 or invisible, the dpi scale of menu is incorrect. Here we set window size to 1x1 and use WS_EX_LAYERED to make window looks like invisible.
+	g_hWnd = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TOPMOST, kMainWindowClassName, nullptr, WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, hInstance, nullptr);
 	FAIL_FAST_LAST_ERROR_IF_NULL(g_hWnd);
+	FAIL_FAST_IF_WIN32_BOOL_FALSE(SetLayeredWindowAttributes(g_hWnd, 0, 0, LWA_ALPHA));
 
-	if (!g_deviceList.Register(hInstance))
-	{
-		LOG_LAST_ERROR();
-		return EXIT_FAILURE;
-	}
-	g_deviceList.SetConnectionManager(&g_connections);
+	DesktopWindowXamlSource desktopSource;
+	auto desktopSourceNative2 = desktopSource.as<IDesktopWindowXamlSourceNative2>();
+	winrt::check_hresult(desktopSourceNative2->AttachToWindow(g_hWnd));
+	winrt::check_hresult(desktopSourceNative2->get_WindowHandle(&g_hWndXaml));
+
+	g_xamlCanvas = Canvas();
+	desktopSource.Content(g_xamlCanvas);
 
 	g_trayIcons = LoadTrayIcons(g_hInst, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
+
+	SetupFlyout();
+	SetupMenu();
+	SetupDevicePicker();
 
 	g_connections.SetStatusHandler(ApplyConnectionStatus);
 
@@ -113,8 +116,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	MSG msg;
 	while (GetMessageW(&msg, nullptr, 0, 0))
 	{
-		TranslateMessage(&msg);
-		DispatchMessageW(&msg);
+		BOOL processed = FALSE;
+		winrt::check_hresult(desktopSourceNative2->PreTranslateMessage(&msg, &processed));
+		if (!processed)
+		{
+			TranslateMessage(&msg);
+			DispatchMessageW(&msg);
+		}
 	}
 
 	return static_cast<int>(msg.wParam);
@@ -128,8 +136,8 @@ namespace
 
 		try
 		{
-			// 不再依赖 XAML Islands，因此只探测 A2DP Sink 本身是否可用。
-			return ApiInformation::IsTypePresent(winrt::name_of<AudioPlaybackConnection>());
+			return ApiInformation::IsTypePresent(winrt::name_of<DesktopWindowXamlSource>()) &&
+				ApiInformation::IsTypePresent(winrt::name_of<AudioPlaybackConnection>());
 		}
 		catch (winrt::hresult_error const&)
 		{
@@ -140,78 +148,21 @@ namespace
 
 	void ApplyConnectionStatus(const DeviceInformation& device, ConnectionStatus status, const std::wstring& message)
 	{
-		g_deviceList.OnConnectionStatus(device, status, message);
-	}
-
-	void ToggleDeviceList(POINT fallbackPoint)
-	{
-		// 托盘图标矩形拿不到时（罕见），退化用鼠标位置当锚点。
-		RECT iconRect = { fallbackPoint.x, fallbackPoint.y, fallbackPoint.x + 1, fallbackPoint.y + 1 };
-		RECT actualRect;
-		if (SUCCEEDED(g_trayIcon.GetRect(actualRect)))
-			iconRect = actualRect;
-
-		g_deviceList.ToggleFromTray(iconRect);
-	}
-
-	void ShowDeviceListFromTray()
-	{
-		RECT iconRect = {};
-		const HRESULT hr = g_trayIcon.GetRect(iconRect);
-		if (FAILED(hr))
+		switch (status)
 		{
-			LOG_HR(hr);
-			return;
-		}
-
-		g_deviceList.Show(iconRect);
-	}
-
-	void OnTrayContextMenu(POINT point)
-	{
-		g_deviceList.Hide();
-
-		switch (ShowTrayMenu(g_hWnd, point))
-		{
-		case TrayMenuCommand::BluetoothSettings:
-			OpenBluetoothSettings();
+		case ConnectionStatus::Connecting:
+			g_devicePicker.SetDisplayStatus(device, _(L"Connecting"), DevicePickerDisplayStatusOptions::ShowProgress | DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 			break;
-		case TrayMenuCommand::Exit:
-			RequestExit();
+		case ConnectionStatus::Connected:
+			g_devicePicker.SetDisplayStatus(device, _(L"Connected"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 			break;
-		case TrayMenuCommand::None:
+		case ConnectionStatus::Failed:
+			g_devicePicker.SetDisplayStatus(device, message, DevicePickerDisplayStatusOptions::ShowRetryButton);
+			break;
+		case ConnectionStatus::Closed:
+			g_devicePicker.SetDisplayStatus(device, {}, DevicePickerDisplayStatusOptions::None);
 			break;
 		}
-	}
-
-	void RequestExit()
-	{
-		if (g_connections.IsEmpty())
-		{
-			PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
-			return;
-		}
-
-		bool reconnect = g_settings.reconnect;
-		if (ConfirmExit(g_hWnd, reconnect))
-		{
-			g_settings.reconnect = reconnect;
-			PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
-		}
-	}
-
-	void OpenBluetoothSettings()
-	{
-		const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", L"ms-settings:bluetooth", nullptr, nullptr, SW_SHOWNORMAL));
-		if (result <= 32)
-		{
-			LOG_LAST_ERROR();
-		}
-	}
-
-	void UpdateNotifyIcon()
-	{
-		g_trayIcon.Refresh(IsSystemLightTheme() ? g_trayIcons.light : g_trayIcons.dark);
 	}
 
 	LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -236,25 +187,40 @@ namespace
 			}
 			break;
 		case WM_NOTIFYICON:
-		{
-			// NOTIFYICON_VERSION_4：wParam 低位是鼠标坐标，lParam 低位是事件。
-			const POINT point = { GET_X_LPARAM(wParam), GET_Y_LPARAM(wParam) };
 			switch (LOWORD(lParam))
 			{
 			case NIN_SELECT:
 			case NIN_KEYSELECT:
-				ToggleDeviceList(point);
+				ShowDevicePicker();
+				break;
+			case WM_RBUTTONUP: // Menu activated by mouse click
+				g_menuFocusState = FocusState::Pointer;
 				break;
 			case WM_CONTEXTMENU:
-				OnTrayContextMenu(point);
-				break;
+			{
+				if (g_menuFocusState == FocusState::Unfocused)
+					g_menuFocusState = FocusState::Keyboard;
+
+				auto dpi = GetDpiForWindow(hWnd);
+				Point point = {
+					static_cast<float>(GET_X_LPARAM(wParam) * USER_DEFAULT_SCREEN_DPI / dpi),
+					static_cast<float>(GET_Y_LPARAM(wParam) * USER_DEFAULT_SCREEN_DPI / dpi)
+				};
+
+				SetWindowPos(g_hWndXaml, 0, 0, 0, 0, 0, SWP_NOZORDER | SWP_SHOWWINDOW);
+				SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, 1, 1, SWP_SHOWWINDOW);
+				SetForegroundWindow(hWnd);
+
+				g_xamlMenu.ShowAt(g_xamlCanvas, point);
 			}
 			break;
-		}
+			}
+			break;
 		case WM_SHOWDEVICES:
-			// 第二个实例被启动：把设备列表弹出来。这里是"确保可见"而不是切换，
-			// 否则用户双击两次反而会把已经打开的列表关掉。
-			ShowDeviceListFromTray();
+			// 第二个实例被启动：把设备列表弹到用户面前。
+			// 这里是"确保可见"，而不是像点托盘图标那样做开关切换——否则连点两次启动，
+			// 反而会把已经打开的列表关掉。
+			ShowDevicePicker();
 			break;
 		case WM_CONNECTDEVICE:
 			if (g_settings.reconnect)
@@ -274,5 +240,144 @@ namespace
 			return DefWindowProcW(hWnd, message, wParam, lParam);
 		}
 		return 0;
+	}
+
+	void ShowDevicePicker()
+	{
+		using namespace winrt::Windows::UI::Popups;
+
+		RECT iconRect;
+		auto hr = g_trayIcon.GetRect(iconRect);
+		if (FAILED(hr))
+		{
+			LOG_HR(hr);
+			return;
+		}
+
+		auto dpi = GetDpiForWindow(g_hWnd);
+		Rect rect = {
+			static_cast<float>(iconRect.left * USER_DEFAULT_SCREEN_DPI / dpi),
+			static_cast<float>(iconRect.top * USER_DEFAULT_SCREEN_DPI / dpi),
+			static_cast<float>((iconRect.right - iconRect.left) * USER_DEFAULT_SCREEN_DPI / dpi),
+			static_cast<float>((iconRect.bottom - iconRect.top) * USER_DEFAULT_SCREEN_DPI / dpi)
+		};
+
+		SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_HIDEWINDOW);
+		SetForegroundWindow(g_hWnd);
+		g_devicePicker.Show(rect, Placement::Above);
+	}
+
+	void SetupFlyout()
+	{
+		TextBlock textBlock;
+		textBlock.Text(_(L"All connections will be closed.\nExit anyway?"));
+		textBlock.Margin({ 0, 0, 0, 12 });
+
+		static CheckBox checkbox;
+		checkbox.IsChecked(g_settings.reconnect);
+		checkbox.Content(winrt::box_value(_(L"Reconnect on next start")));
+
+		Button button;
+		button.Content(winrt::box_value(_(L"Exit")));
+		button.HorizontalAlignment(HorizontalAlignment::Right);
+		button.Click([](const auto&, const auto&) {
+			g_settings.reconnect = checkbox.IsChecked().Value();
+			PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
+		});
+
+		StackPanel stackPanel;
+		stackPanel.Children().Append(textBlock);
+		stackPanel.Children().Append(checkbox);
+		stackPanel.Children().Append(button);
+
+		Flyout flyout;
+		flyout.ShouldConstrainToRootBounds(false);
+		flyout.Content(stackPanel);
+
+		g_xamlFlyout = flyout;
+	}
+
+	void SetupMenu()
+	{
+		// https://docs.microsoft.com/en-us/windows/uwp/design/style/segoe-ui-symbol-font
+		FontIcon settingsIcon;
+		settingsIcon.Glyph(L"\xE713");
+
+		MenuFlyoutItem settingsItem;
+		settingsItem.Text(_(L"Bluetooth Settings"));
+		settingsItem.Icon(settingsIcon);
+		settingsItem.Click([](const auto&, const auto&) {
+			winrt::Windows::System::Launcher::LaunchUriAsync(Uri(L"ms-settings:bluetooth"));
+		});
+
+		FontIcon closeIcon;
+		closeIcon.Glyph(L"\xE8BB");
+
+		MenuFlyoutItem exitItem;
+		exitItem.Text(_(L"Exit"));
+		exitItem.Icon(closeIcon);
+		exitItem.Click([](const auto&, const auto&) {
+			if (g_connections.IsEmpty())
+			{
+				PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
+				return;
+			}
+
+			RECT iconRect;
+			auto hr = g_trayIcon.GetRect(iconRect);
+			if (FAILED(hr))
+			{
+				LOG_HR(hr);
+				return;
+			}
+
+			auto dpi = GetDpiForWindow(g_hWnd);
+
+			SetWindowPos(g_hWnd, HWND_TOPMOST, iconRect.left, iconRect.top, 0, 0, SWP_HIDEWINDOW);
+			g_xamlCanvas.Width(static_cast<float>((iconRect.right - iconRect.left) * USER_DEFAULT_SCREEN_DPI / dpi));
+			g_xamlCanvas.Height(static_cast<float>((iconRect.bottom - iconRect.top) * USER_DEFAULT_SCREEN_DPI / dpi));
+
+			g_xamlFlyout.ShowAt(g_xamlCanvas);
+		});
+
+		MenuFlyout menu;
+		menu.Items().Append(settingsItem);
+		menu.Items().Append(exitItem);
+		menu.Opened([](const auto& sender, const auto&) {
+			auto menuItems = sender.template as<MenuFlyout>().Items();
+			auto itemsCount = menuItems.Size();
+			if (itemsCount > 0)
+			{
+				menuItems.GetAt(itemsCount - 1).Focus(g_menuFocusState);
+			}
+			g_menuFocusState = FocusState::Unfocused;
+		});
+		menu.Closed([](const auto&, const auto&) {
+			ShowWindow(g_hWnd, SW_HIDE);
+		});
+
+		g_xamlMenu = menu;
+	}
+
+	void SetupDevicePicker()
+	{
+		g_devicePicker = DevicePicker();
+		winrt::check_hresult(g_devicePicker.as<IInitializeWithWindow>()->Initialize(g_hWnd));
+
+		g_devicePicker.Filter().SupportedDeviceSelectors().Append(AudioPlaybackConnection::GetDeviceSelector());
+		g_devicePicker.DevicePickerDismissed([](const auto&, const auto&) {
+			SetWindowPos(g_hWnd, nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_HIDEWINDOW);
+		});
+		g_devicePicker.DeviceSelected([](const auto&, const auto& args) {
+			g_connections.Connect(args.SelectedDevice());
+		});
+		g_devicePicker.DisconnectButtonClicked([](const auto&, const auto& args) {
+			g_connections.Disconnect(args.Device().Id());
+		});
+	}
+
+	void UpdateNotifyIcon()
+	{
+		g_trayIcon.Refresh(IsSystemLightTheme() ? g_trayIcons.light : g_trayIcons.dark);
 	}
 }

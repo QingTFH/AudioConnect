@@ -2,7 +2,7 @@
 
 // 蓝牙 A2DP Sink 连接的生命周期管理。
 // 与 UI 完全解耦：状态变化通过 SetStatusHandler 回调上报，
-// 由调用方决定怎么呈现（现在是自建的设备列表弹窗）。
+// 由调用方决定怎么呈现（现在是 XAML DevicePicker，将来可以是任何东西）。
 
 #include <functional>
 #include <string>

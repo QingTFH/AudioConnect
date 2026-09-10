@@ -16,7 +16,7 @@ public:
 	void Refresh(HICON icon);
 	void Remove();
 
-	// 取托盘图标屏幕矩形，用于把设备列表弹窗定位到图标附近。
+	// 取托盘图标屏幕矩形，用于把 XAML 浮层定位到图标附近。
 	HRESULT GetRect(RECT& rect);
 
 private:

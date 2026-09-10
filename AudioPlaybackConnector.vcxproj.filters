@@ -30,12 +30,6 @@
     <ClInclude Include="ConnectionManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DeviceListWindow.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ExitConfirm.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="I18n.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -49,9 +43,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TrayIcon.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="TrayMenu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Util.h">
@@ -71,12 +62,6 @@
     <ClCompile Include="ConnectionManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="DeviceListWindow.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ExitConfirm.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="I18n.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -90,9 +75,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="TrayIcon.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="TrayMenu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Util.cpp">
