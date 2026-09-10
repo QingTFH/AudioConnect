@@ -126,8 +126,9 @@ jobs:
 
       - name: Run unit tests
         # ARM64 exe 无法在 x64 runner 上执行；x86/x64 均可运行
+        # Tests 的 OutDir 按工程平台命名：sln 的 x86 映射为工程的 Win32
         if: matrix.platform != 'ARM64'
-        run: bin\${{ matrix.platform }}_Release\Tests.exe
+        run: .\bin\${{ matrix.bindir }}\Tests.exe
 
       - uses: actions/upload-artifact@v4
         with:
