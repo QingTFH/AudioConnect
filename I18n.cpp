@@ -22,16 +22,31 @@ void LoadTranslateData(HINSTANCE hInst)
 	if (!hResData)
 		return;
 
+	auto size = SizeofResource(hInst, hRes);
+
 	// 偏移量是相对资源数据起始处的，必须用 LockResource 返回的指针做基准。
 	auto data = static_cast<const uint8_t*>(LockResource(hResData));
 	if (!data)
 		return;
 
+	LoadTranslateDataFromMemory(data, size);
+}
+
+void LoadTranslateDataFromMemory(const uint8_t* data, size_t size)
+{
+	if (size < sizeof(uint16_t))
+		return;
+
 	auto ymo = reinterpret_cast<const YMOData*>(data);
+	// 表声明了 len 条目，实际数据必须装得下完整表。
+	if (size < sizeof(uint16_t) + static_cast<size_t>(ymo->len) * sizeof(ymo->table[0]))
+		return;
 	g_hashToStrMap.reserve(ymo->len);
 
 	for (int i = 0; i < ymo->len; ++i)
 	{
+		if (ymo->table[i].offset >= size)
+			continue;
 		auto str = reinterpret_cast<const wchar_t*>(data + ymo->table[i].offset);
 		g_hashToStrMap.emplace(ymo->table[i].hash, str);
 	}

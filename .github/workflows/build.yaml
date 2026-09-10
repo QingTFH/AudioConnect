@@ -121,6 +121,11 @@ jobs:
       - name: Build ${{ matrix.platform }}
         run: msbuild AudioPlaybackConnector.sln -nologo -m "-p:Configuration=Release;Platform=${{ matrix.platform }};PlatformToolset=${{ steps.toolset.outputs.toolset }}"
 
+      - name: Run unit tests
+        # ARM64 exe 无法在 x64 runner 上执行；x86/x64 均可运行
+        if: matrix.platform != 'ARM64'
+        run: bin\${{ matrix.platform }}_Release\Tests.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
