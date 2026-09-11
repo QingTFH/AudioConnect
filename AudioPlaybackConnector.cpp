@@ -5,6 +5,7 @@
 #include "ConnectionManager.h"
 #include "I18n.h"
 #include "Log.h"
+#include "SerializedExecutor.h"
 #include "Settings.h"
 #include "Singleton.h"
 #include "SvgIcon.h"
@@ -24,8 +25,12 @@ namespace
 	DevicePicker g_devicePicker = nullptr;
 	UINT g_wmTaskbarCreated = 0;
 
-	// 工厂注入（step13a）：静态初始化期只构造对象、不调 WinRT，安全。
-	ConnectionManager g_connections{ std::make_unique<WinrtConnectionFactory>() };
+	// 执行器 + 工厂注入（step13a/13b）：静态初始化期只构造对象、不调 WinRT，安全。
+	// 执行器线程要在生产路径调 WinRT（Create / StartAsync 等），故以 threadInit
+	// 注入 init_apartment（SerializedExecutor.h 刻意零 WinRT 依赖，不能自包含）。
+	std::shared_ptr<SerializedExecutor> g_executor = std::make_shared<SerializedExecutor>(
+		L"apc-connection", [] { winrt::init_apartment(); });
+	ConnectionManager g_connections{ g_executor, std::make_unique<WinrtConnectionFactory>() };
 	TrayIcon g_trayIcon;
 	TrayIcons g_trayIcons;
 	SettingsData g_settings;

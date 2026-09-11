@@ -6,6 +6,7 @@
 #include "Log.h"
 
 #include <cwchar>
+#include <future>
 
 namespace
 {
@@ -49,15 +50,32 @@ namespace
 
 		return logger::Compose(L"device=\"", std::wstring(device.Name()), L"\" id=", std::wstring(device.Id()));
 	}
+
+	// 只读快照 / CloseAll 的限时等待上限（step13b 计划书 §D-1）。
+	// 执行器任务恒短（await 不占任务），正常远小于此值；超时说明执行器
+	// 已异常停摆，此时降级返回并落日志，绝不无限阻塞 UI 线程。
+	constexpr auto kSnapshotTimeout = std::chrono::milliseconds{ 2000 };
 }
 
-ConnectionManager::ConnectionManager(std::unique_ptr<IAudioConnectionFactory> factory)
-	: m_factory(std::move(factory))
+ConnectionManager::ConnectionManager(std::shared_ptr<SerializedExecutor> executor,
+	std::unique_ptr<IAudioConnectionFactory> factory)
+	: m_executor(std::move(executor))
+	, m_factory(std::move(factory))
 {
+}
+
+ConnectionManager::~ConnectionManager()
+{
+	// 排空剩余任务并收线程。此后不再有任务引用 this，
+	// 进程 teardown（WinRT 清理、静态对象析构）可以安全进行。
+	if (m_executor)
+		m_executor->Stop();
 }
 
 void ConnectionManager::SetStatusHandler(ConnectionStatusHandler handler)
 {
+	// 只允许在执行器开始消费之前赋值（生产在 wmain 早期、首次 Connect 之前）；
+	// 之后 handler 会被执行器线程并发读取，改动即数据竞争。
 	m_statusHandler = std::move(handler);
 }
 
@@ -90,11 +108,15 @@ void ConnectionManager::CloseQuietly(std::shared_ptr<IAudioConnection> const& co
 winrt::fire_and_forget ConnectionManager::Connect(DeviceInformation device)
 {
 	const std::wstring deviceId(device.Id());
-	return ConnectImpl(deviceId, std::move(device));
+	m_executor->Post([this, deviceId, device = std::move(device)]() mutable {
+		ConnectImpl(deviceId, std::move(device));
+	});
+	co_return;
 }
 
 winrt::fire_and_forget ConnectionManager::ConnectImpl(std::wstring deviceId, DeviceInformation device)
 {
+	// —— 初始段：执行器线程（生产由 Connect 投递到这里，测试经 Harness 投递）——
 	Report(device, ConnectionStatus::Connecting);
 	logger::Write(logger::Compose(L"Connect: enter ", DescribeDevice(device)));
 
@@ -125,11 +147,15 @@ winrt::fire_and_forget ConnectionManager::ConnectImpl(std::wstring deviceId, Dev
 			generation = ++m_nextGeneration;
 
 			connection->RegisterStateChanged([this, deviceId, generation](std::wstring_view stateName) {
-				OnStateChanged(deviceId, stateName, generation);
+				// 平台回调只入队（step13 设计 §2.2 规则 1）：
+				// StateChanged 来自 WinRT 事件线程，表操作一律回执行器线程做。
+				m_executor->Post([this, deviceId, generation, stateName = std::wstring(stateName)] {
+					OnStateChanged(deviceId, stateName, generation);
+				});
 			});
 
 			inserted = m_connections.emplace(
-				deviceId, ConnectionEntry{ device, connection, generation, true, false }).second;
+				deviceId, ConnectionEntry{ device, connection, generation, LifecycleState::Connecting }).second;
 			logger::Write(logger::Compose(
 				L"Connect: entry inserted=", inserted ? L"true" : L"false",
 				L" generation=", std::to_wstring(generation), L" ", DescribeDevice(device)));
@@ -176,15 +202,23 @@ winrt::fire_and_forget ConnectionManager::ConnectImpl(std::wstring deviceId, Dev
 		LOG_CAUGHT_EXCEPTION();
 	}
 
+	// —— 跳回执行器线程（step13b 计划书 §D-3）——
+	// Start/Open 的 AsyncOp 完成与异常恢复都发生在 WinRT 线程池线程上
+	//（与 13a 验收过的行为一致，L1 零改动）；从 co_await 到这里之间
+	// 只允许操作局部变量（switch / errorMessage 均不入表）。之后的收尾段
+	//（动表、Report）必须回到执行器线程。
+	co_await m_executor->YieldTo();
+
+	// —— 收尾段：执行器线程 ——
 	// Open 期间条目可能已被替换（重复连接）或摘除（用户断开 / 远端关闭）。
 	// 只有"仍属于本次调用"才允许动表，否则说明结果已经过期。
 	auto it = m_connections.find(deviceId);
 	const bool current = inserted && (it != m_connections.end()) && (it->second.generation == generation);
-	const bool closedWhileOpening = current && it->second.closedWhileOpening;
+	const bool closedWhileOpening = current && (it->second.state == LifecycleState::Disconnecting);
 
 	if (current && success && !closedWhileOpening)
 	{
-		it->second.opening = false;
+		it->second.state = LifecycleState::Connected;
 		Report(device, ConnectionStatus::Connected);
 	}
 	else if (current)
@@ -234,10 +268,12 @@ winrt::fire_and_forget ConnectionManager::ConnectById(std::wstring deviceId)
 	}
 }
 
-bool ConnectionManager::Disconnect(const DeviceInformation& device)
+void ConnectionManager::Disconnect(const DeviceInformation& device)
 {
 	const std::wstring deviceId(device.Id());
-	return DisconnectImpl(deviceId, device);
+	m_executor->Post([this, deviceId, device] {
+		DisconnectImpl(deviceId, device);
+	});
 }
 
 bool ConnectionManager::DisconnectImpl(std::wstring deviceId, const DeviceInformation& device)
@@ -288,6 +324,26 @@ bool ConnectionManager::DisconnectImpl(std::wstring deviceId, const DeviceInform
 
 void ConnectionManager::CloseAll()
 {
+	// 退出路径（WM_DESTROY）调用：必须【同步】等关闭全部完成才能继续走
+	// 消息循环退出 —— 否则执行器线程会在进程 teardown 中还在调 WinRT
+	//（13a R6 同类的退出期崩溃）。
+	if (m_executor->IsOnExecutorThread())
+	{
+		CloseAllOnExecutor();
+		return;
+	}
+
+	auto task = std::make_shared<std::packaged_task<void()>>([this] { CloseAllOnExecutor(); });
+	auto future = task->get_future();
+	if (!m_executor->Post([task] { (*task)(); }))
+		return; // 执行器已停（进程退出尾声），无处可投
+
+	if (future.wait_for(kSnapshotTimeout) != std::future_status::ready)
+		logger::Write(L"CloseAll: executor wait timed out");
+}
+
+void ConnectionManager::CloseAllOnExecutor()
+{
 	// 整表先挪走：每条 Close() 期间即使同步派发 StateChanged，OnStateChanged 也
 	// 找不到条目，不会二次摘除（E2 的根因）。
 	auto entries = std::move(m_connections);
@@ -305,18 +361,54 @@ void ConnectionManager::CloseAll()
 
 bool ConnectionManager::IsEmpty() const
 {
-	return m_connections.empty();
+	if (m_executor->IsOnExecutorThread())
+		return m_connections.empty();
+
+	auto task = std::make_shared<std::packaged_task<bool()>>([this] { return m_connections.empty(); });
+	auto future = task->get_future();
+	if (!m_executor->Post([task] { (*task)(); }))
+		return true;
+
+	if (future.wait_for(kSnapshotTimeout) == std::future_status::ready)
+		return future.get();
+
+	// 降级取向刻意取 false（"非空"）：IsEmpty 守着退出确认浮层 ——
+	// 宁可让用户多确认一次，也不能静默跳过确认（头文件注）。
+	logger::Write(L"IsEmpty: executor wait timed out, degrading to false");
+	return false;
 }
 
 std::vector<std::wstring> ConnectionManager::DeviceIds() const
 {
-	std::vector<std::wstring> ids;
-	ids.reserve(m_connections.size());
-	for (const auto& entry : m_connections)
+	if (m_executor->IsOnExecutorThread())
 	{
-		ids.push_back(entry.first);
+		std::vector<std::wstring> ids;
+		ids.reserve(m_connections.size());
+		for (const auto& entry : m_connections)
+		{
+			ids.push_back(entry.first);
+		}
+		return ids;
 	}
-	return ids;
+
+	auto task = std::make_shared<std::packaged_task<std::vector<std::wstring>()>>([this] {
+		std::vector<std::wstring> ids;
+		ids.reserve(m_connections.size());
+		for (const auto& entry : m_connections)
+		{
+			ids.push_back(entry.first);
+		}
+		return ids;
+	});
+	auto future = task->get_future();
+	if (!m_executor->Post([task] { (*task)(); }))
+		return {};
+
+	if (future.wait_for(kSnapshotTimeout) == std::future_status::ready)
+		return future.get();
+
+	logger::Write(L"DeviceIds: executor wait timed out, degrading to empty");
+	return {};
 }
 
 void ConnectionManager::OnStateChanged(std::wstring const& deviceId, std::wstring_view stateName, uint32_t generation)
@@ -344,11 +436,11 @@ void ConnectionManager::OnStateChanged(std::wstring const& deviceId, std::wstrin
 		return;
 	}
 
-	if (it->second.opening)
+	if (it->second.state == LifecycleState::Connecting)
 	{
-		// 连接还没出结果，先记下来交给 Connect() 协程统一收尾，
+		// 连接还没出结果：转 Disconnecting，交给 Connect() 协程统一收尾，
 		// 否则会出现"刚报已连接、条目却已被摘掉"的脱节。
-		it->second.closedWhileOpening = true;
+		it->second.state = LifecycleState::Disconnecting;
 		logger::Write(L"StateChanged: closed while opening, deferred to Connect()");
 		return;
 	}

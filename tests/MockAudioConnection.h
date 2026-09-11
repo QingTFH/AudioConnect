@@ -41,6 +41,7 @@ struct MockAudioConnection final : public IAudioConnection
 	AsyncOp<void> Start() override
 	{
 		callLog.push_back(L"Start");
+		callThreads.push_back(std::this_thread::get_id());
 		if (startError)
 			return AsyncOp<void>::FromError(startError);
 		return AsyncOp<void>::FromValue();
@@ -49,6 +50,7 @@ struct MockAudioConnection final : public IAudioConnection
 	AsyncOp<OpenOutcome> Open() override
 	{
 		callLog.push_back(L"Open");
+		callThreads.push_back(std::this_thread::get_id());
 		if (openError)
 			return AsyncOp<OpenOutcome>::FromError(openError);
 		if (holdOpen)

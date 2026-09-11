@@ -1,6 +1,11 @@
-// 连接路径单测（step13a）：经 mock 工厂驱动 ConnectionManager 的连接/断开主路径，
-// 在无蓝牙、无网络、无真实 WinRT 运行时行为的环境里覆盖计划书 §验收 的断言清单。
-// 断言计数与 main.cpp 共享（g_checks / g_failures）。
+// 连接路径单测（step13a 建立，step13b 改造）：经 mock 工厂驱动 ConnectionManager
+// 的连接/断开主路径，在无蓝牙、无网络、无真实 WinRT 运行时行为的环境里覆盖
+// 两份计划书的断言清单。
+//
+// step13b 驱动方式变化：ConnectImpl/DisconnectImpl 只能在执行器线程上运行
+//（生产由 Connect/Disconnect 投递），测试经 Harness::Post 投递 + drain() 等待，
+// 不变式逐条保留；新增线程不变量 / 并发压测 / 快照降级用例（13b 计划书 §验收）。
+// 断言计数与 main.cpp 共享（g_checks / g_failures）；CHECK 只允许在主测试线程使用。
 
 #include "../pch.h"
 
@@ -10,9 +15,12 @@
 
 #include <exception>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -34,6 +42,8 @@ extern int g_failures;
 
 namespace
 {
+	using namespace std::chrono_literals;
+
 	// 空投影：DescribeDevice/Report 走 "device=<null>" 分支，不需要真设备。
 	DeviceInformation NullDevice()
 	{
@@ -79,15 +89,62 @@ namespace
 	struct Harness
 	{
 		std::vector<std::pair<ConnectionStatus, std::wstring>> events;
+		std::vector<std::thread::id> handlerThreads; // Report 路径的被调线程（13b 断言 5）
 		std::shared_ptr<SharedFactory> factory = std::make_shared<SharedFactory>();
+		std::shared_ptr<SerializedExecutor> executor = std::make_shared<SerializedExecutor>(L"test-exec");
 		std::unique_ptr<ConnectionManager> mgr;
 
 		Harness()
-			: mgr(std::make_unique<ConnectionManager>(std::make_unique<ForwardFactory>(factory)))
+			: mgr(std::make_unique<ConnectionManager>(executor, std::make_unique<ForwardFactory>(factory)))
 		{
 			mgr->SetStatusHandler([this](const DeviceInformation&, ConnectionStatus status, const std::wstring& message) {
+				handlerThreads.push_back(std::this_thread::get_id());
 				events.emplace_back(status, message);
 			});
+		}
+
+		~Harness()
+		{
+			// ConnectionManager 析构会 Stop 执行器（排空 + 收线程）。
+			mgr.reset();
+		}
+
+		// Post 不做 CHECK：压测里会从工作线程调用，断言计数器非原子。
+		template <typename F>
+		void Post(F&& fn)
+		{
+			executor->Post(std::function<void()>(std::forward<F>(fn)));
+		}
+
+		// 等队列排空。只允许主测试线程调用。
+		void drain()
+		{
+			CHECK(executor->DrainFor(10s));
+		}
+
+		// 投递一次 ConnectImpl（等价生产路径 Connect 的内部投递）。
+		void Connect(const wchar_t* id)
+		{
+			Post([this, id = std::wstring(id)] { mgr->ConnectImpl(id, NullDevice()); });
+		}
+
+		// 投递一次 DisconnectImpl；closedOut 可选回传其 bool 返回值。
+		void Disconnect(const wchar_t* id, bool* closedOut = nullptr)
+		{
+			Post([this, id = std::wstring(id), closedOut] {
+				const bool closed = mgr->DisconnectImpl(id, NullDevice());
+				if (closedOut)
+					*closedOut = closed;
+			});
+		}
+
+		// 取执行器线程 id（probe 任务）。
+		std::thread::id ExecutorThreadId()
+		{
+			std::thread::id id{};
+			Post([&id] { id = std::this_thread::get_id(); });
+			drain();
+			return id;
 		}
 
 		int Count(ConnectionStatus status) const
@@ -115,7 +172,8 @@ namespace
 		Harness h;
 		h.factory->returnNull = true;
 
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 
 		CHECK(h.events.size() == 2);
 		CHECK(h.Count(ConnectionStatus::Connecting) == 1);
@@ -131,13 +189,14 @@ namespace
 	{
 		Harness h;
 
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 
 		CHECK(h.Count(ConnectionStatus::Connecting) == 1);
 		CHECK(h.Count(ConnectionStatus::Connected) == 1);
 		CHECK(h.Count(ConnectionStatus::Failed) == 0);
 		CHECK(h.Count(ConnectionStatus::Closed) == 0);
-		CHECK(!h.mgr->IsEmpty());
+		CHECK(h.mgr->IsEmpty() == false);
 
 		auto mock = h.factory->created.back();
 		CHECK(mock->closeCount == 0);
@@ -154,7 +213,8 @@ namespace
 			m.openOutcome = OpenOutcome{ OpenResultKind::TimedOut, 0 };
 		};
 
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 
 		CHECK(h.Count(ConnectionStatus::Failed) == 1);
 		auto msg = h.LastMessage(ConnectionStatus::Failed);
@@ -172,7 +232,8 @@ namespace
 			m.openOutcome = OpenOutcome{ OpenResultKind::Denied, 0 };
 		};
 
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 
 		CHECK(h.Count(ConnectionStatus::Failed) == 1);
 		auto msg = h.LastMessage(ConnectionStatus::Failed);
@@ -190,7 +251,8 @@ namespace
 			m.openOutcome = OpenOutcome{ OpenResultKind::UnknownFailure, 0x80070005u };
 		};
 
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 
 		CHECK(h.Count(ConnectionStatus::Failed) == 1);
 		auto msg = h.LastMessage(ConnectionStatus::Failed);
@@ -208,7 +270,8 @@ namespace
 				winrt::hresult_error(winrt::hresult{ static_cast<int32_t>(0x80004005) }));
 		};
 
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 
 		CHECK(h.Count(ConnectionStatus::Failed) == 1);
 		auto msg = h.LastMessage(ConnectionStatus::Failed);
@@ -225,7 +288,8 @@ namespace
 				winrt::hresult_error(winrt::hresult{ static_cast<int32_t>(0x80070490) }));
 		};
 
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 
 		auto mock = h.factory->created.back();
 		// callLog = ["Start", "Close"]：收尾摘出条目并 Close；关键是不出现 "Open"。
@@ -238,6 +302,7 @@ namespace
 	}
 
 	// —— 断言 6 / 7：Open 期间收到 Closed ⇒ 不报 Connected、收尾报 Closed 恰一次 ——
+	//      （CompleteOpen 在测试线程恢复协程 ⇒ 走真实的 YieldTo hop，13b 断言 2 的 hop 路径）
 	void TestClosedWhileOpening()
 	{
 		Harness h;
@@ -245,13 +310,16 @@ namespace
 			m.holdOpen = true;
 		};
 
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 
 		auto mock = h.factory->created.back();
 		CHECK(h.Count(ConnectionStatus::Connected) == 0); // 还挂着，没有任何收尾
 
-		mock->EmitClosed();                               // opening 期间的 Closed
-		mock->CompleteOpen(OpenOutcome{ OpenResultKind::Success, 0 });
+		mock->EmitClosed();                               // opening 期间的 Closed（投递）
+		mock->CompleteOpen(OpenOutcome{ OpenResultKind::Success, 0 }); // 协程在测试线程恢复 → hop
+
+		h.drain();
 
 		CHECK(h.Count(ConnectionStatus::Closed) == 1);
 		CHECK(h.Count(ConnectionStatus::Connected) == 0);
@@ -263,10 +331,13 @@ namespace
 	void TestDisconnectTracked()
 	{
 		Harness h;
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 		CHECK(h.Count(ConnectionStatus::Connected) == 1);
 
-		bool closed = h.mgr->DisconnectImpl(L"dev1", NullDevice());
+		bool closed = false;
+		h.Disconnect(L"dev1", &closed);
+		h.drain();
 
 		CHECK(closed);
 		CHECK(h.Count(ConnectionStatus::Closed) == 1);
@@ -280,7 +351,9 @@ namespace
 		Harness h;
 		CHECK(h.mgr->IsEmpty());
 
-		bool closed = h.mgr->DisconnectImpl(L"dev1", NullDevice());
+		bool closed = false;
+		h.Disconnect(L"dev1", &closed);
+		h.drain();
 
 		CHECK(closed);
 		CHECK(h.factory->created.size() == 1); // 现造了一个连接对象
@@ -294,7 +367,9 @@ namespace
 		Harness h;
 		h.factory->returnNull = true;
 
-		bool closed = h.mgr->DisconnectImpl(L"dev1", NullDevice());
+		bool closed = true;
+		h.Disconnect(L"dev1", &closed);
+		h.drain();
 
 		CHECK(!closed);
 		CHECK(h.Count(ConnectionStatus::Closed) == 1); // 界面必须复位
@@ -304,12 +379,15 @@ namespace
 	void TestCloseDuringClose()
 	{
 		Harness h;
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 
 		auto mock = h.factory->created.back();
 		mock->emitClosedOnClose = true;
 
-		bool closed = h.mgr->DisconnectImpl(L"dev1", NullDevice());
+		bool closed = false;
+		h.Disconnect(L"dev1", &closed);
+		h.drain();
 
 		CHECK(closed);
 		CHECK(h.Count(ConnectionStatus::Closed) == 1); // "先摘出再 Close" ⇒ 回调找不到条目
@@ -320,21 +398,26 @@ namespace
 	void TestConnectReplacesExisting()
 	{
 		Harness h;
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 		auto first = h.factory->created[0];
 
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
+		h.Connect(L"dev1");
+		h.drain();
 		auto second = h.factory->created[1];
 
 		CHECK(first->closeCount == 1);
 		CHECK(h.mgr->DeviceIds().size() == 1);
 
 		h.events.clear();
+		h.handlerThreads.clear();
 		first->EmitClosed(); // 旧实例迟到回调：generation 不匹配 ⇒ 忽略
+		h.drain();
 		CHECK(h.Count(ConnectionStatus::Closed) == 0);
-		CHECK(!h.mgr->IsEmpty());
+		CHECK(h.mgr->IsEmpty() == false);
 
 		second->EmitClosed(); // 当前条目 ⇒ 摘出并上报
+		h.drain();
 		CHECK(h.Count(ConnectionStatus::Closed) == 1);
 		CHECK(h.mgr->IsEmpty());
 		CHECK(second->closeCount == 0); // 远端关闭路径不重复 Close
@@ -345,13 +428,14 @@ namespace
 	{
 		{
 			Harness h;
-			h.mgr->CloseAll(); // 空表
+			h.mgr->CloseAll(); // 空表（阻塞语义，直接返回）
 			CHECK(h.events.empty());
 		}
 		{
 			Harness h;
-			h.mgr->ConnectImpl(L"dev1", NullDevice());
-			h.mgr->ConnectImpl(L"dev2", NullDevice());
+			h.Connect(L"dev1");
+			h.Connect(L"dev2");
+			h.drain();
 			CHECK(h.mgr->DeviceIds().size() == 2);
 
 			h.mgr->CloseAll();
@@ -370,8 +454,9 @@ namespace
 	void TestDeviceIds()
 	{
 		Harness h;
-		h.mgr->ConnectImpl(L"dev1", NullDevice());
-		h.mgr->ConnectImpl(L"dev2", NullDevice());
+		h.Connect(L"dev1");
+		h.Connect(L"dev2");
+		h.drain();
 
 		auto ids = h.mgr->DeviceIds();
 		CHECK(ids.size() == 2);
@@ -383,6 +468,125 @@ namespace
 		}
 		CHECK(has1);
 		CHECK(has2);
+	}
+
+	// —— 13b 断言 3 / 5：表操作与 handler 只在执行器线程 ——
+	void TestThreadInvariants()
+	{
+		Harness h;
+		auto execId = h.ExecutorThreadId();
+
+		h.Connect(L"dev1");
+		h.drain();
+		auto mock = h.factory->created.back();
+		mock->EmitClosed(); // 平台回调在测试线程触发（模拟 WinRT 事件线程）→ L2 入队
+		h.drain();
+
+		// L2 对连接对象的调用（Start/Open/Close）全部发生在执行器线程
+		CHECK(mock->callThreads.size() == mock->callLog.size());
+		for (auto tid : mock->callThreads)
+			CHECK(tid == execId);
+		// ConnectionStatusHandler（Report 路径）全部在执行器线程
+		for (auto tid : h.handlerThreads)
+			CHECK(tid == execId);
+	}
+
+	// —— 13b 断言 4：并发压测 ——
+	// 多线程交错投递 Connect/Disconnect 同一设备；同时一个线程锤只读快照。
+	// 串行化下的确定性不变量：终态表空（每轮以 Disconnect 收尾）、
+	// 无泄漏（每个被创建的连接恰 Close 一次）、handler 线程恒为执行器线程。
+	void TestConcurrentStress()
+	{
+		Harness h;
+		auto execId = h.ExecutorThreadId();
+
+		constexpr int kThreads = 4;
+		constexpr int kRounds = 25;
+		std::atomic<int> snapshotMismatches{ 0 };
+
+		{
+			std::vector<std::thread> workers;
+			for (int t = 0; t < kThreads; ++t)
+			{
+				workers.emplace_back([&h] {
+					for (int i = 0; i < kRounds; ++i)
+					{
+						h.Connect(L"stress");
+						h.Disconnect(L"stress");
+					}
+				});
+			}
+			std::thread snapshotter([&h, &snapshotMismatches] {
+				for (int i = 0; i < 50; ++i)
+				{
+					const bool empty = h.mgr->IsEmpty();
+					auto ids = h.mgr->DeviceIds();
+					if (empty != ids.empty())
+						++snapshotMismatches;
+				}
+			});
+
+			for (auto& w : workers)
+				w.join();
+			snapshotter.join();
+		}
+
+		h.drain();
+
+		CHECK(snapshotMismatches == 0);
+		CHECK(h.mgr->IsEmpty()); // 每轮 [Connect, Disconnect] ⇒ 终态必空
+		CHECK(h.mgr->DeviceIds().empty());
+
+		int closes = 0;
+		for (auto const& m : h.factory->created)
+		{
+			closes += m->closeCount;
+			for (auto tid : m->callThreads)
+				CHECK(tid == execId);
+		}
+		CHECK(closes == static_cast<int>(h.factory->created.size())); // 无泄漏条目
+
+		for (auto tid : h.handlerThreads)
+			CHECK(tid == execId);
+	}
+
+	// —— 13b 断言 6：快照限时等待的超时降级路径 ——
+	void TestSnapshotTimeoutDegradation()
+	{
+		Harness h;
+		// 占住执行器 2.5s > 快照超时 2s ⇒ IsEmpty/DeviceIds 走降级
+		h.Post([] { std::this_thread::sleep_for(2500ms); });
+
+		CHECK(h.mgr->IsEmpty() == false); // 保守取向：按"非空"降级（守住退出确认）
+		auto ids = h.mgr->DeviceIds();
+		CHECK(ids.empty());               // 快照降级为空
+
+		h.drain(); // 等长任务与堆积的快照任务处理完
+	}
+
+	// —— 13b 断言 7：连接进行中 CloseAll ⇒ 条目摘出、协程结果作废（discard 路径）——
+	void TestCloseAllDuringOpening()
+	{
+		Harness h;
+		h.factory->onCreate = [](MockAudioConnection& m) {
+			m.holdOpen = true;
+		};
+
+		h.Connect(L"dev1");
+		h.drain();
+		CHECK(h.Count(ConnectionStatus::Connected) == 0);
+
+		h.mgr->CloseAll(); // 阻塞：条目被摘出并 Close，Report(Closed)
+		CHECK(h.Count(ConnectionStatus::Closed) == 1);
+		CHECK(h.mgr->IsEmpty());
+
+		auto mock = h.factory->created.back();
+		mock->CompleteOpen(OpenOutcome{ OpenResultKind::Success, 0 }); // 协程恢复 → hop → 收尾
+		h.drain();
+
+		// 条目已不在表 ⇒ "result discarded" 分支：不再产生新事件、不重复 Close
+		CHECK(h.events.size() == 2); // Connecting + Closed
+		CHECK(mock->closeCount == 1);
 	}
 
 	// —— 断言 16：AsyncOp 自身（FromValue 同步 / 挂起后 Complete /
@@ -518,6 +722,10 @@ int RunConnectionManagerTests()
 	TestConnectReplacesExisting();
 	TestCloseAll();
 	TestDeviceIds();
+	TestThreadInvariants();
+	TestConcurrentStress();
+	TestSnapshotTimeoutDegradation();
+	TestCloseAllDuringOpening();
 	TestAsyncOp();
 
 	return g_failures;
