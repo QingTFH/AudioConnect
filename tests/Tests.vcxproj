@@ -111,8 +111,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="SerializedExecutorTests.cpp" />
     <ClCompile Include="ConnectionManagerTests.cpp" />
     <ClCompile Include="..\ConnectionManager.cpp" />
+    <ClCompile Include="..\SerializedExecutor.cpp" />
     <ClCompile Include="..\Util.cpp" />
     <ClCompile Include="..\I18n.cpp" />
     <ClCompile Include="..\Log.cpp" />
@@ -123,6 +125,7 @@
     <ClInclude Include="..\AsyncOp.hpp" />
     <ClInclude Include="..\AudioConnection.h" />
     <ClInclude Include="..\ConnectionManager.h" />
+    <ClInclude Include="..\SerializedExecutor.h" />
     <ClInclude Include="..\FnvHash.hpp" />
     <ClInclude Include="MockAudioConnection.h" />
     <ClInclude Include="..\Util.h" />

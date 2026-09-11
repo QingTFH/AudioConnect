@@ -240,6 +240,7 @@ int wmain()
 	TestLogFormat();
 	TestLogCompose();
 	TestConnectionStatusName();
+	RunSerializedExecutorTests();
 	RunConnectionManagerTests();
 
 	std::wcout << L"checks=" << g_checks << L" failures=" << g_failures << std::endl;

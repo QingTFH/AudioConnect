@@ -340,6 +340,7 @@
     <ClInclude Include="Log.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="SerializedExecutor.h" />
     <ClInclude Include="Settings.h" />
     <ClInclude Include="Singleton.h" />
     <ClInclude Include="SvgIcon.h" />
@@ -353,6 +354,7 @@
     <ClCompile Include="ConnectionManager.cpp" />
     <ClCompile Include="I18n.cpp" />
     <ClCompile Include="Log.cpp" />
+    <ClCompile Include="SerializedExecutor.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="Singleton.cpp" />
     <ClCompile Include="SvgIcon.cpp" />

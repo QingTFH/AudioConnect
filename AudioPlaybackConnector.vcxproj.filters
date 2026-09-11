@@ -74,6 +74,9 @@
     <ClCompile Include="ConnectionManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="SerializedExecutor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="WinrtAudioConnection.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
