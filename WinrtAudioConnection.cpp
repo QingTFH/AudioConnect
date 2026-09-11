@@ -67,12 +67,13 @@ AsyncOp<void> WinrtAudioConnection::Start()
 	auto state = op.state();
 	auto connection = m_connection;
 
-	connection.StartAsync([state = std::move(state), connection = std::move(connection)](
-		winrt::Windows::Foundation::IAsyncAction const& async, winrt::Windows::Foundation::AsyncStatus)
+	auto async = connection.StartAsync();
+	async.Completed([state = std::move(state), connection = std::move(connection)](
+		winrt::Windows::Foundation::IAsyncAction const& action, winrt::Windows::Foundation::AsyncStatus)
 	{
 		try
 		{
-			async.GetResults();
+			action.GetResults();
 			state->Complete();
 		}
 		catch (...)
@@ -90,13 +91,14 @@ AsyncOp<OpenOutcome> WinrtAudioConnection::Open()
 	auto state = op.state();
 	auto connection = m_connection;
 
-	connection.OpenAsync([state = std::move(state), connection = std::move(connection)](
-		winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Media::Audio::AudioPlaybackConnectionOpenResult> const& async,
+	auto async = connection.OpenAsync();
+	async.Completed([state = std::move(state), connection = std::move(connection)](
+		winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Media::Audio::AudioPlaybackConnectionOpenResult> const& operation,
 		winrt::Windows::Foundation::AsyncStatus)
 	{
 		try
 		{
-			auto result = async.GetResults();
+			auto result = operation.GetResults();
 
 			OpenOutcome outcome{};
 			switch (result.Status())
