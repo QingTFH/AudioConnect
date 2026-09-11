@@ -57,21 +57,29 @@ std::wstring WinrtAudioConnection::DeviceId() const
 
 AsyncOp<void> WinrtAudioConnection::Start()
 {
+	// 不经中间 fire_and_forget 协程（2026-09-11 真机首跑悬死的修复）：
+	// 中间协程的 apartment 编组语义与 ConnectImpl 直接 co_await 不同，
+	// 导致完成回调无法送达。改为 Completed 回调直接喂 AsyncOp ——
+	// 回调在系统完成线程上触发，Complete() 在该线程 inline 恢复
+	// ConnectImpl，与接口化之前（co_await 直接写在 ConnectImpl 里）
+	// 的线程行为完全一致。
 	auto op = AsyncOp<void>{};
 	auto state = op.state();
 	auto connection = m_connection;
 
-	[state = std::move(state), connection = std::move(connection)]() -> winrt::fire_and_forget {
+	connection.StartAsync([state = std::move(state), connection = std::move(connection)](
+		winrt::Windows::Foundation::IAsyncAction const& async, winrt::Windows::Foundation::AsyncStatus)
+	{
 		try
 		{
-			co_await connection.StartAsync();
+			async.GetResults();
 			state->Complete();
 		}
 		catch (...)
 		{
 			state->CompleteError(std::current_exception());
 		}
-	}();
+	});
 
 	return op;
 }
@@ -82,10 +90,13 @@ AsyncOp<OpenOutcome> WinrtAudioConnection::Open()
 	auto state = op.state();
 	auto connection = m_connection;
 
-	[state = std::move(state), connection = std::move(connection)]() -> winrt::fire_and_forget {
+	connection.OpenAsync([state = std::move(state), connection = std::move(connection)](
+		winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Media::Audio::AudioPlaybackConnectionOpenResult> const& async,
+		winrt::Windows::Foundation::AsyncStatus)
+	{
 		try
 		{
-			auto result = co_await connection.OpenAsync();
+			auto result = async.GetResults();
 
 			OpenOutcome outcome{};
 			switch (result.Status())
@@ -111,7 +122,7 @@ AsyncOp<OpenOutcome> WinrtAudioConnection::Open()
 		{
 			state->CompleteError(std::current_exception());
 		}
-	}();
+	});
 
 	return op;
 }
