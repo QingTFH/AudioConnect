@@ -158,6 +158,24 @@ void WinrtAudioConnection::Close() noexcept
 	}
 }
 
+void WinrtAudioConnection::DetachAbi() noexcept
+{
+	// 故意泄漏底层 ABI 引用（step13c 计划书 §D-2b/修订 R2，APC2 同款）：
+	// 连接对象从此不参与析构，规避进程 teardown 期的 STA 重入崩溃。
+	// detach 后投影包装已空，成员置空使其析构成为平凡操作。
+	if (!m_connection)
+		return;
+	try
+	{
+		[[maybe_unused]] auto leaked = winrt::detach_abi(m_connection);
+	}
+	catch (...)
+	{
+		LOG_CAUGHT_EXCEPTION();
+	}
+	m_connection = nullptr;
+}
+
 std::shared_ptr<IAudioConnection> WinrtConnectionFactory::Create(std::wstring const& deviceId)
 {
 	// TryCreateFromId 失败返回 null（不抛）；设备无效等异常向上传播，

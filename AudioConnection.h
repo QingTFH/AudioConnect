@@ -71,6 +71,11 @@ public:
 	virtual void RegisterStateChanged(std::function<void(std::wstring_view stateName)> onStateChanged) = 0;
 
 	virtual void Close() noexcept = 0;
+
+	// 进程退出兜底（step13c 计划书 §D-2b，修订 R2）：故意泄漏底层 WinRT 对象的
+	// ABI 引用，使其不参与进程 teardown 析构（APC2 DetachForProcessExit 同款
+	// 防护）。调用后连接不再可用；只许在退出路径调用。noexcept。
+	virtual void DetachAbi() noexcept = 0;
 };
 
 class IAudioConnectionFactory

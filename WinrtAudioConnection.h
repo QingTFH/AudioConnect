@@ -24,6 +24,9 @@ public:
 	// 的 catch 文案随之下沉到这里，保证日志一致）。
 	void Close() noexcept override;
 
+	// step13c：泄漏底层 ABI 引用（进程退出兜底，计划书 §D-2b/修订 R2）。
+	void DetachAbi() noexcept override;
+
 private:
 	winrt::Windows::Media::Audio::AudioPlaybackConnection m_connection;
 };

@@ -28,6 +28,7 @@ struct MockAudioConnection final : public IAudioConnection
 	std::vector<std::wstring> callLog; // 依序记录 "Start" / "Open" / "Close"
 	std::vector<std::thread::id> callThreads; // 与 callLog 一一对应：被调时所在线程（13b 线程不变量用）
 	int closeCount = 0;
+	int detachCount = 0;
 
 	explicit MockAudioConnection(std::wstring deviceId)
 		: id(std::move(deviceId))
@@ -75,6 +76,12 @@ struct MockAudioConnection final : public IAudioConnection
 		callThreads.push_back(std::this_thread::get_id());
 		if (emitClosedOnClose)
 			EmitClosed();
+	}
+
+	// step13c：真实现是泄漏 ABI 引用；mock 无 ABI 可泄，记一笔留断言口子。
+	void DetachAbi() noexcept override
+	{
+		++detachCount;
 	}
 
 	// —— 测试驱动接口 ——

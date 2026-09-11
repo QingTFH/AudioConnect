@@ -359,6 +359,44 @@ void ConnectionManager::CloseAllOnExecutor()
 	}
 }
 
+void ConnectionManager::DetachForProcessExit() noexcept
+{
+	// 退出路径兜底（step13c 计划书 §D-2b）。noexcept：任何异常吞掉 ——
+	// 这里抛出去就是 fire_and_forget/WndProc 里的 terminate。
+	try
+	{
+		if (m_executor->IsOnExecutorThread())
+		{
+			DetachForProcessExitOnExecutor();
+			return;
+		}
+
+		auto task = std::make_shared<std::packaged_task<void()>>([this] { DetachForProcessExitOnExecutor(); });
+		auto future = task->get_future();
+		if (!m_executor->Post([task] { (*task)(); }))
+			return; // 执行器已停：投不进去，进程即刻结束，泄漏无从谈起
+		future.wait_for(kSnapshotTimeout); // 限时等待，超时即放弃（退出路径不无限阻塞）
+	}
+	catch (...)
+	{
+		LOG_CAUGHT_EXCEPTION();
+	}
+}
+
+void ConnectionManager::DetachForProcessExitOnExecutor() noexcept
+{
+	if (m_connections.empty())
+		return; // 正常路径：CloseAll 已清表，幂等空操作
+
+	logger::Write(logger::Compose(L"DetachForProcessExit: detached ",
+		std::to_wstring(m_connections.size()), L" connection(s)"));
+	for (auto& pair : m_connections)
+		pair.second.connection->DetachAbi();
+	// 只清表不 Close、不上报：退出期 UI 更新已被 g_exiting 闸丢弃，
+	// Close 对即将随进程消亡的连接已无意义（APC2 语义：泄漏替代关闭）。
+	m_connections.clear();
+}
+
 bool ConnectionManager::IsEmpty() const
 {
 	if (m_executor->IsOnExecutorThread())

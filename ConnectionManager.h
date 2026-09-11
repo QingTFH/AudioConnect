@@ -87,6 +87,12 @@ public:
 	// 关闭并上报全部连接，随后清空。阻塞至执行器完成关闭（限时）。
 	void CloseAll();
 
+	// 进程退出兜底（step13c 计划书 §D-2b）：对表内【残余】条目泄漏底层 ABI 引用
+	//（DetachAbi）后清表，不让连接对象参与进程 teardown 析构。正常路径 CloseAll
+	// 已清表，本方法是幂等空操作；只在 CloseAll 超时降级（执行器停摆）时兜底。
+	// 投递执行器 + 限时等待；投不进去时静默放弃（进程即将结束，无可再保）。
+	void DetachForProcessExit() noexcept;
+
 	// 只读快照。阻塞至执行器给出结果（限时）；超时降级并落日志。
 	// IsEmpty 降级取向刻意取 false（"非空"）：它守着退出确认浮层
 	//（AudioPlaybackConnector.cpp 的 exitItem.Click）——宁可让用户多确认一次，
@@ -129,6 +135,9 @@ private:
 
 	// CloseAll 的实现主体（执行器线程上运行）。
 	void CloseAllOnExecutor();
+
+	// DetachForProcessExit 的实现主体（执行器线程上运行）。
+	void DetachForProcessExitOnExecutor() noexcept;
 
 	// 从表中摘出条目，由调用方决定是否 Close()。
 	// 必须先摘出再 Close：Close 可能同步派发 StateChanged，此时表里已无该条目，
