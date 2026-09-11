@@ -26,6 +26,7 @@ struct MockAudioConnection final : public IAudioConnection
 
 	// —— 观测 ——
 	std::vector<std::wstring> callLog; // 依序记录 "Start" / "Open" / "Close"
+	std::vector<std::thread::id> callThreads; // 与 callLog 一一对应：被调时所在线程（13b 线程不变量用）
 	int closeCount = 0;
 
 	explicit MockAudioConnection(std::wstring deviceId)
@@ -71,6 +72,7 @@ struct MockAudioConnection final : public IAudioConnection
 	{
 		++closeCount;
 		callLog.push_back(L"Close");
+		callThreads.push_back(std::this_thread::get_id());
 		if (emitClosedOnClose)
 			EmitClosed();
 	}

@@ -139,14 +139,18 @@ int RunSerializedExecutorTests()
 	{
 		SerializedExecutor executor(L"test-hop");
 		std::thread::id landedOn{};
+		std::thread::id execThreadId{};
 		bool done = false;
+
+		executor.Post([&execThreadId] { execThreadId = std::this_thread::get_id(); });
+		CHECK(executor.DrainFor(kTimeout));
 
 		HopFrom(executor, &landedOn, &done); // 在测试线程启动，挂起在 YieldTo
 		CHECK(!done);                        // 尚未恢复
 
 		CHECK(executor.DrainFor(kTimeout));
 		CHECK(done);
-		CHECK(landedOn == executor.m_thread.get_id());
+		CHECK(landedOn == execThreadId);
 
 		executor.Stop();
 	}

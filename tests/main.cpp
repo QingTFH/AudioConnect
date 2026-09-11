@@ -20,6 +20,7 @@ int g_checks = 0;
 int g_failures = 0;
 
 int RunConnectionManagerTests();
+int RunSerializedExecutorTests();
 
 #define WIDEN2(x) L##x
 #define WIDEN(x) WIDEN2(x)
