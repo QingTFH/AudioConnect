@@ -2,6 +2,8 @@
 
 #include "AudioPlaybackConnector.h"
 
+#include <atomic>
+
 #include "ConnectionManager.h"
 #include "I18n.h"
 #include "Log.h"
@@ -25,6 +27,10 @@ namespace
 	DevicePicker g_devicePicker = nullptr;
 	UINT g_wmTaskbarCreated = 0;
 
+	// 退出闸（step13c 计划书 §D-2a）：WM_DESTROY 入处置位，此后执行器线程
+	// 上报的状态不再封送到 UI —— 窗口即将销毁，迟到的 UI 更新既无意义又有害。
+	std::atomic<bool> g_exiting{ false };
+
 	// 执行器 + 工厂注入（step13a/13b）：静态初始化期只构造对象、不调 WinRT，安全。
 	// 执行器线程要在生产路径调 WinRT（Create / StartAsync 等），故以 threadInit
 	// 注入 init_apartment（SerializedExecutor.h 刻意零 WinRT 依赖，不能自包含）。
@@ -41,6 +47,7 @@ namespace
 	void SetupDevicePicker();
 	void UpdateNotifyIcon();
 	void ApplyConnectionStatus(const DeviceInformation& device, ConnectionStatus status, const std::wstring& message);
+	void ApplyConnectionStatusOnUi(const DeviceInformation& device, ConnectionStatus status, const std::wstring& message);
 	void ShowDevicePicker();
 	LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 }
@@ -161,7 +168,52 @@ namespace
 		}
 	}
 
+	// 把 UI 更新从执行器线程封送回 UI 线程（step13c 计划书 §D-1）。
+	// 非阻塞投递：执行器线程绝不等待 UI（设计 §6 风险表"封送引入新的死锁"）；
+	// 失败即丢弃 —— 降级取向是宁可少一次 UI 更新，也不在非 UI 线程碰 XAML。
+	void MarshalToUi(std::function<void()> fn)
+	{
+		if (g_exiting.load(std::memory_order_acquire))
+			return;
+
+		auto* task = new std::function<void()>(std::move(fn));
+		if (!PostMessageW(g_hWnd, WM_MARSHAL, 0, reinterpret_cast<LPARAM>(task)))
+		{
+			// 投递失败（窗口已失效等）：发送侧负责释放，接收侧不会执行。
+			delete task;
+			logger::Write(L"UI: marshal dropped (PostMessage failed)");
+		}
+	}
+
+	// 对 XAML 投影对象泄漏 ABI 引用（step13c 计划书 §D-2c）：静态存储期的
+	// winrt 全局析构晚于 XAML 框架死亡，让它们不参与 CRT teardown 析构。
+	template <typename T>
+	void DetachAbiQuietly(T& object) noexcept
+	{
+		try
+		{
+			(void)winrt::detach_abi(object);
+		}
+		catch (...)
+		{
+		}
+	}
+
 	void ApplyConnectionStatus(const DeviceInformation& device, ConnectionStatus status, const std::wstring& message)
+	{
+		// 13b「事件线程承诺」：本函数在执行器线程被调。UI 只许在 UI 线程碰
+		//（设计 §2.2 规则 3）⇒ 函数体整体封送回 UI 线程执行（step13c §D-1）。
+		// DeviceInformation 是 agile 类型，按值捕获跨线程安全。
+		MarshalToUi([device, status, message]
+		{
+			logger::Write(logger::Compose(L"UI: ApplyConnectionStatus status=", ConnectionStatusName(status)));
+			ApplyConnectionStatusOnUi(device, status, message);
+		});
+	}
+
+	// ApplyConnectionStatus 的 UI 侧主体，只在 UI 线程上运行（经 WM_MARSHAL）。
+	// 函数体与封送改造之前逐字一致。
+	void ApplyConnectionStatusOnUi(const DeviceInformation& device, ConnectionStatus status, const std::wstring& message)
 	{
 		switch (status)
 		{
@@ -184,8 +236,20 @@ namespace
 	{
 		switch (message)
 		{
+		case WM_MARSHAL:
+		{
+			// 执行器线程 → UI 线程的封送载体（step13c §D-1）。接收侧执行并释放；
+			// 投递失败时发送侧已释放，两侧互斥（计划书 §易错点 2）。
+			auto* task = reinterpret_cast<std::function<void()>*>(lParam);
+			(*task)();
+			delete task;
+			break;
+		}
 		case WM_DESTROY:
 		{
+			// 退出闸先落位：此后执行器上报的状态一律不再封送（计划书 §D-2a）。
+			g_exiting.store(true, std::memory_order_release);
+
 			// 勾选了"下次启动重连"才把当前设备写进配置，否则落盘空列表。
 			g_settings.lastDevices = g_settings.reconnect ? g_connections.DeviceIds() : std::vector<std::wstring>{};
 			logger::Write(logger::Compose(
@@ -194,7 +258,16 @@ namespace
 			SaveSettings(GetSettingsPath(g_hInst), g_settings);
 
 			g_connections.CloseAll();
+			// CloseAll 超时降级时表里可能残留连接：泄漏其 ABI 引用而非 Close，
+			// 不让它们参与进程 teardown 析构（step13c §D-2b，APC2 同款）。
+			g_connections.DetachForProcessExit();
 			g_trayIcon.Remove();
+			// XAML 全局对象是静态存储期：析构晚于 XAML 框架死亡，是退出期
+			// 崩溃源 —— 同样故意泄漏（step13c §D-2c）。进程随即退出，无副作用。
+			DetachAbiQuietly(g_xamlCanvas);
+			DetachAbiQuietly(g_xamlFlyout);
+			DetachAbiQuietly(g_xamlMenu);
+			DetachAbiQuietly(g_devicePicker);
 			PostQuitMessage(0);
 			break;
 		}
